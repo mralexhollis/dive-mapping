@@ -53,6 +53,10 @@ export interface EditorState {
   showPrintArea: boolean;
   /** When true, layer views and the Inspector render in display-only mode. */
   readOnly: boolean;
+  /** Hide the left tools panel — useful on narrow viewports. */
+  toolbarCollapsed: boolean;
+  /** Hide the right Inspector + Layers column — useful on narrow viewports. */
+  sidebarCollapsed: boolean;
 }
 
 const HISTORY_LIMIT = 100;
@@ -86,6 +90,8 @@ interface Actions {
   setPendingPolyline(p: EditorState['pendingPolyline']): void;
   setShowPrintArea(v: boolean): void;
   setReadOnly(v: boolean): void;
+  setToolbarCollapsed(v: boolean): void;
+  setSidebarCollapsed(v: boolean): void;
 
   setLayerVisible(key: LayerKey, visible: boolean): void;
   setLayerLocked(key: LayerKey, locked: boolean): void;
@@ -104,6 +110,8 @@ const initialEditor: EditorState = {
   pendingPolyline: null,
   showPrintArea: false,
   readOnly: false,
+  toolbarCollapsed: false,
+  sidebarCollapsed: false,
 };
 
 function pushPast(past: Site[], snapshot: Site): Site[] {
@@ -202,6 +210,8 @@ export const useSiteStore = create<State & Actions>((set, get) => ({
   setPendingPolyline: (pendingPolyline) => set({ editor: { ...get().editor, pendingPolyline } }),
   setShowPrintArea: (v) => set({ editor: { ...get().editor, showPrintArea: v } }),
   setReadOnly: (v) => set({ editor: { ...get().editor, readOnly: v } }),
+  setToolbarCollapsed: (v) => set({ editor: { ...get().editor, toolbarCollapsed: v } }),
+  setSidebarCollapsed: (v) => set({ editor: { ...get().editor, sidebarCollapsed: v } }),
 
   setLayerVisible: (key, visible) =>
     get().mutateSite((draft) => {

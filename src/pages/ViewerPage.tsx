@@ -3,11 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import MapCanvas from '../components/Map/MapCanvas';
 import Inspector from '../components/Editor/Inspector';
 import LayersPanel from '../components/Editor/LayersPanel';
+import { useResponsivePanels } from '../hooks/useResponsivePanels';
 import { useSiteStore } from '../state/useSiteStore';
 import { loadSite } from '../state/persistence';
 import { fitViewportToWorldRect, resolveDefaultPrintArea } from '../utils/fitViewport';
 
 export default function ViewerPage() {
+  useResponsivePanels();
   const navigate = useNavigate();
   const { siteId } = useParams<{ siteId: string }>();
   const site = useSiteStore((s) => s.site);
@@ -15,6 +17,8 @@ export default function ViewerPage() {
   const setReadOnly = useSiteStore((s) => s.setReadOnly);
   const setViewport = useSiteStore((s) => s.setViewport);
   const canvasSize = useSiteStore((s) => s.editor.canvasSize);
+  const sidebarCollapsed = useSiteStore((s) => s.editor.sidebarCollapsed);
+  const setSidebarCollapsed = useSiteStore((s) => s.setSidebarCollapsed);
   const fittedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -49,28 +53,39 @@ export default function ViewerPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-water-200 bg-white px-3 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <Link to="/" className="text-sm text-water-700 hover:text-water-900">
             ←
           </Link>
-          <h1 className="text-sm font-semibold text-water-900">{site.meta.name}</h1>
+          <h1 className="truncate text-sm font-semibold text-water-900">{site.meta.name}</h1>
           <span className="rounded bg-water-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-water-700">
             view only
           </span>
         </div>
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-pressed={!sidebarCollapsed}
+          className="shrink-0 rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
+        >
+          Sidebar {sidebarCollapsed ? '◂' : '▸'}
+        </button>
       </header>
       <div className="flex flex-1 min-h-0">
-        <main className="relative flex-1">
+        <main className="relative flex-1 min-w-0">
           <MapCanvas interactive={false} />
         </main>
-        <div className="hidden w-72 flex-col border-l border-water-200 bg-white md:flex">
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <Inspector />
+        {!sidebarCollapsed && (
+          <div className="flex w-72 flex-col border-l border-water-200 bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <Inspector />
+            </div>
+            <div className="border-t border-water-200">
+              <LayersPanel />
+            </div>
           </div>
-          <div className="border-t border-water-200">
-            <LayersPanel />
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import Toolbar from '../components/Editor/Toolbar';
 import Inspector from '../components/Editor/Inspector';
 import MapCanvas from '../components/Map/MapCanvas';
 import { useKeyboard } from '../hooks/useKeyboard';
+import { useResponsivePanels } from '../hooks/useResponsivePanels';
 import { useSiteStore } from '../state/useSiteStore';
 import {
   exportPngDownload,
@@ -15,6 +16,7 @@ import {
 
 export default function EditorPage() {
   useKeyboard();
+  useResponsivePanels();
   const navigate = useNavigate();
   const { siteId } = useParams<{ siteId: string }>();
   const site = useSiteStore((s) => s.site);
@@ -27,6 +29,11 @@ export default function EditorPage() {
   const redo = useSiteStore((s) => s.redo);
   const canUndo = useSiteStore((s) => s.past.length > 0);
   const canRedo = useSiteStore((s) => s.future.length > 0);
+
+  const toolbarCollapsed = useSiteStore((s) => s.editor.toolbarCollapsed);
+  const sidebarCollapsed = useSiteStore((s) => s.editor.sidebarCollapsed);
+  const setToolbarCollapsed = useSiteStore((s) => s.setToolbarCollapsed);
+  const setSidebarCollapsed = useSiteStore((s) => s.setSidebarCollapsed);
 
   // Sync URL siteId → store. If the URL points at a site we don't have in
   // memory, try to load from localStorage; otherwise bounce home.
@@ -53,8 +60,18 @@ export default function EditorPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-water-200 bg-white px-4 py-2">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-y-1 border-b border-water-200 bg-white px-2 py-2 sm:px-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
+            title={toolbarCollapsed ? 'Show tools' : 'Hide tools'}
+            aria-label={toolbarCollapsed ? 'Show tools' : 'Hide tools'}
+            aria-pressed={!toolbarCollapsed}
+            className="rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
+          >
+            {toolbarCollapsed ? '▸' : '◂'} Tools
+          </button>
           <Link to="/" className="text-sm text-water-700 hover:text-water-900">
             ← Sites
           </Link>
@@ -68,10 +85,10 @@ export default function EditorPage() {
               });
             }}
             title="Click to rename this site"
-            className="rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-water-900 hover:border-water-200 focus:border-water-400 focus:outline-none"
+            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-water-900 hover:border-water-200 focus:border-water-400 focus:outline-none sm:flex-none"
           />
         </div>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <label className="flex items-center gap-1 text-xs text-water-700">
             Grid =
             <input
@@ -86,13 +103,13 @@ export default function EditorPage() {
                   d.meta.gridSpacingMeters = v;
                 });
               }}
-              className="w-14 rounded border border-water-200 px-1 py-0.5 text-right"
+              className="w-12 rounded border border-water-200 px-1 py-0.5 text-right"
               aria-label="metres per grid square"
             />
             m
           </label>
           <label className="flex items-center gap-1 text-xs text-water-700">
-            Screen N =
+            N =
             <input
               type="number"
               step={1}
@@ -104,13 +121,13 @@ export default function EditorPage() {
                   d.meta.northBearingDeg = ((v % 360) + 360) % 360;
                 });
               }}
-              className="w-14 rounded border border-water-200 px-1 py-0.5 text-right"
+              className="w-12 rounded border border-water-200 px-1 py-0.5 text-right"
               aria-label="bearing of screen-up (degrees)"
               title="Bearing that screen-up represents. 0 = north up."
             />
             °
           </label>
-          <span className="mx-2 h-4 w-px bg-water-200" />
+          <span className="hidden h-4 w-px bg-water-200 sm:block" />
           <button
             type="button"
             onClick={undo}
@@ -127,7 +144,7 @@ export default function EditorPage() {
           >
             Redo
           </button>
-          <span className="mx-2 h-4 w-px bg-water-200" />
+          <span className="hidden h-4 w-px bg-water-200 sm:block" />
           <label className="flex items-center gap-1 text-xs text-water-700">
             <input
               type="checkbox"
@@ -150,49 +167,68 @@ export default function EditorPage() {
             />
             Print area
           </label>
-          <span className="mx-2 h-4 w-px bg-water-200" />
+          <span className="hidden h-4 w-px bg-water-200 sm:block" />
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded border border-water-200 px-2 py-1 text-xs text-water-900 hover:bg-water-100">
+              Export ▾
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 flex w-44 flex-col rounded border border-water-200 bg-white shadow">
+              <button
+                type="button"
+                onClick={() => exportSiteAsJsonDownload(site)}
+                className="px-3 py-1.5 text-left text-sm text-water-900 hover:bg-water-100"
+              >
+                JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const svg = findSvg();
+                  if (svg) exportSvgDownload(svg, site.meta.name);
+                }}
+                className="px-3 py-1.5 text-left text-sm text-water-900 hover:bg-water-100"
+              >
+                SVG
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const svg = findSvg();
+                  if (svg) exportPngDownload(svg, site.meta.name);
+                }}
+                className="px-3 py-1.5 text-left text-sm text-water-900 hover:bg-water-100"
+              >
+                PNG
+              </button>
+            </div>
+          </details>
           <button
             type="button"
-            onClick={() => exportSiteAsJsonDownload(site)}
-            className="rounded border border-water-200 px-2 py-1 text-water-900 hover:bg-water-100"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            aria-pressed={!sidebarCollapsed}
+            className="rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
           >
-            Export JSON
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const svg = findSvg();
-              if (svg) exportSvgDownload(svg, site.meta.name);
-            }}
-            className="rounded border border-water-200 px-2 py-1 text-water-900 hover:bg-water-100"
-          >
-            Export SVG
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const svg = findSvg();
-              if (svg) exportPngDownload(svg, site.meta.name);
-            }}
-            className="rounded border border-water-200 px-2 py-1 text-water-900 hover:bg-water-100"
-          >
-            Export PNG
+            Sidebar {sidebarCollapsed ? '◂' : '▸'}
           </button>
         </div>
       </header>
       <div className="flex flex-1 min-h-0">
-        <Toolbar />
-        <main className="relative flex-1">
+        {!toolbarCollapsed && <Toolbar />}
+        <main className="relative flex-1 min-w-0">
           <MapCanvas />
         </main>
-        <div className="flex w-72 flex-col border-l border-water-200 bg-white">
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <Inspector />
+        {!sidebarCollapsed && (
+          <div className="flex w-72 flex-col border-l border-water-200 bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <Inspector />
+            </div>
+            <div className="border-t border-water-200">
+              <LayersPanel />
+            </div>
           </div>
-          <div className="border-t border-water-200">
-            <LayersPanel />
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
