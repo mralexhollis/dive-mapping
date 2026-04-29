@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSiteStore } from '../../state/useSiteStore';
 import { generateContours, mergeContours } from '../../domain/contours';
 import type { DepthSounding } from '../../domain/types';
@@ -8,11 +8,33 @@ interface Props {
 }
 
 export default function ContourGeneratorDialog({ onClose }: Props) {
-  const soundings = useSiteStore((s) => s.site.layers.measurements.soundings);
-  const shoreline = useSiteStore((s) => s.site.layers.waterBody.shoreline);
+  const site = useSiteStore((s) => s.site);
+  const soundings = site.layers.measurements.soundings;
+  const shoreline = site.layers.waterBody.shoreline;
   const mutate = useSiteStore((s) => s.mutateSite);
+
+  // Compute the deepest depth seen anywhere in the site so the dialog opens
+  // already covering 0 → deepest. Recomputed on each open via useMemo
+  // (the dialog only mounts on demand).
+  const deepest = useMemo(() => {
+    let m = 0;
+    for (const s of soundings) if (s.depth > m) m = s.depth;
+    for (const p of site.layers.poi.pois) {
+      if (p.depth != null && p.depth > m) m = p.depth;
+    }
+    for (const sp of site.layers.subPoi.items) {
+      if (sp.depth != null && sp.depth > m) m = sp.depth;
+    }
+    for (const c of site.layers.depth.contours) if (c.depth > m) m = c.depth;
+    for (const l of site.layers.depth.labels ?? []) if (l.depth > m) m = l.depth;
+    // Round up to the next nice number so the dialog covers a margin past
+    // the deepest reading.
+    if (m === 0) return 20;
+    return Math.ceil(m);
+  }, [site, soundings]);
+
   const [minDepth, setMinDepth] = useState(0);
-  const [maxDepth, setMaxDepth] = useState(20);
+  const [maxDepth, setMaxDepth] = useState(deepest);
   const [step, setStep] = useState(2);
   const [includeShoreAsZero, setIncludeShoreAsZero] = useState(true);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
