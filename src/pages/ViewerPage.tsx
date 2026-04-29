@@ -19,6 +19,8 @@ export default function ViewerPage() {
   const canvasSize = useSiteStore((s) => s.editor.canvasSize);
   const sidebarCollapsed = useSiteStore((s) => s.editor.sidebarCollapsed);
   const setSidebarCollapsed = useSiteStore((s) => s.setSidebarCollapsed);
+  const mutate = useSiteStore((s) => s.mutateSite);
+  const showLegend = !!site.meta.showLegend;
   const fittedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -62,15 +64,30 @@ export default function ViewerPage() {
             view only
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          aria-pressed={!sidebarCollapsed}
-          className="shrink-0 rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
-        >
-          Sidebar {sidebarCollapsed ? '◂' : '▸'}
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-water-700">
+            <input
+              type="checkbox"
+              checked={showLegend}
+              onChange={(e) =>
+                mutate((d) => {
+                  d.meta.showLegend = e.target.checked;
+                })
+              }
+              className="accent-water-600"
+            />
+            Legend
+          </label>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            aria-pressed={!sidebarCollapsed}
+            className="shrink-0 rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
+          >
+            Sidebar {sidebarCollapsed ? '◂' : '▸'}
+          </button>
+        </div>
       </header>
       <div className="flex flex-1 min-h-0">
         <main className="relative flex-1 min-w-0">
