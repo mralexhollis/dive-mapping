@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type SVGProps } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import LayersPanel from '../components/Editor/LayersPanel';
 import Toolbar from '../components/Editor/Toolbar';
@@ -60,8 +60,9 @@ export default function EditorPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-y-1 border-b border-water-200 bg-white px-2 py-2 sm:px-4">
-        <div className="flex items-center gap-2 sm:gap-3">
+      <header className="flex items-center justify-between gap-2 border-b border-water-200 bg-white px-2 py-2 sm:px-4">
+        {/* Left: Tools toggle + back link */}
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
@@ -72,9 +73,16 @@ export default function EditorPage() {
           >
             {toolbarCollapsed ? '▸' : '◂'} Tools
           </button>
-          <Link to="/" className="text-sm text-water-700 hover:text-water-900">
-            ← Sites
+          <Link
+            to="/"
+            className="hidden text-sm text-water-700 hover:text-water-900 sm:inline"
+            title="Back to sites"
+          >
+            ←
           </Link>
+        </div>
+        {/* Centre: site name */}
+        <div className="flex min-w-0 flex-1 items-center justify-center">
           <input
             type="text"
             value={site.meta.name}
@@ -85,94 +93,113 @@ export default function EditorPage() {
               });
             }}
             title="Click to rename this site"
-            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-water-900 hover:border-water-200 focus:border-water-400 focus:outline-none sm:flex-none"
+            className="min-w-0 max-w-full truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-center text-sm font-semibold text-water-900 hover:border-water-200 focus:border-water-400 focus:outline-none"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <label className="flex items-center gap-1 text-xs text-water-700">
-            Grid =
-            <input
-              type="number"
-              min={0.1}
-              step={0.5}
-              value={gridMeters}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (!Number.isFinite(v) || v <= 0) return;
-                mutate((d) => {
-                  d.meta.gridSpacingMeters = v;
-                });
-              }}
-              className="w-12 rounded border border-water-200 px-1 py-0.5 text-right"
-              aria-label="metres per grid square"
-            />
-            m
-          </label>
-          <label className="flex items-center gap-1 text-xs text-water-700">
-            N =
-            <input
-              type="number"
-              step={1}
-              value={Math.round(site.meta.northBearingDeg ?? 0)}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (!Number.isFinite(v)) return;
-                mutate((d) => {
-                  d.meta.northBearingDeg = ((v % 360) + 360) % 360;
-                });
-              }}
-              className="w-12 rounded border border-water-200 px-1 py-0.5 text-right"
-              aria-label="bearing of screen-up (degrees)"
-              title="Bearing that screen-up represents. 0 = north up."
-            />
-            °
-          </label>
-          <span className="hidden h-4 w-px bg-water-200 sm:block" />
+        {/* Right: undo/redo (always), more-settings popover, export, sidebar toggle */}
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={undo}
             disabled={!canUndo}
-            className="rounded px-2 py-1 text-water-700 hover:bg-water-100 disabled:text-water-300"
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+            className="rounded p-1 text-water-700 hover:bg-water-100 disabled:cursor-not-allowed disabled:text-water-300"
           >
-            Undo
+            <UndoIcon />
           </button>
           <button
             type="button"
             onClick={redo}
             disabled={!canRedo}
-            className="rounded px-2 py-1 text-water-700 hover:bg-water-100 disabled:text-water-300"
+            title="Redo (Ctrl+Shift+Z)"
+            aria-label="Redo"
+            className="rounded p-1 text-water-700 hover:bg-water-100 disabled:cursor-not-allowed disabled:text-water-300"
           >
-            Redo
+            <RedoIcon />
           </button>
-          <span className="hidden h-4 w-px bg-water-200 sm:block" />
-          <label className="flex items-center gap-1 text-xs text-water-700">
-            <input
-              type="checkbox"
-              checked={showLegend}
-              onChange={(e) =>
-                mutate((d) => {
-                  d.meta.showLegend = e.target.checked;
-                })
-              }
-              className="accent-water-600"
-            />
-            Legend
-          </label>
-          <label className="flex items-center gap-1 text-xs text-water-700">
-            <input
-              type="checkbox"
-              checked={showPrintArea}
-              onChange={togglePrintArea}
-              className="accent-water-600"
-            />
-            Print area
-          </label>
-          <span className="hidden h-4 w-px bg-water-200 sm:block" />
           <details className="relative">
-            <summary className="cursor-pointer list-none rounded border border-water-200 px-2 py-1 text-xs text-water-900 hover:bg-water-100">
+            <summary
+              className="flex cursor-pointer list-none items-center gap-0.5 rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
+              aria-label="Map settings"
+              title="Map settings"
+            >
+              <SettingsIcon /> ▾
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 flex w-56 flex-col gap-2 rounded border border-water-200 bg-white p-3 text-sm shadow">
+              <label className="flex items-center justify-between gap-2 text-xs text-water-700">
+                <span>Grid spacing</span>
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.5}
+                    value={gridMeters}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v) || v <= 0) return;
+                      mutate((d) => {
+                        d.meta.gridSpacingMeters = v;
+                      });
+                    }}
+                    className="w-14 rounded border border-water-200 px-1 py-0.5 text-right"
+                    aria-label="metres per grid square"
+                  />
+                  m
+                </span>
+              </label>
+              <label className="flex items-center justify-between gap-2 text-xs text-water-700">
+                <span>Screen-up bearing</span>
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step={1}
+                    value={Math.round(site.meta.northBearingDeg ?? 0)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      mutate((d) => {
+                        d.meta.northBearingDeg = ((v % 360) + 360) % 360;
+                      });
+                    }}
+                    className="w-14 rounded border border-water-200 px-1 py-0.5 text-right"
+                    aria-label="bearing of screen-up (degrees)"
+                  />
+                  °
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-water-900">
+                <input
+                  type="checkbox"
+                  checked={showLegend}
+                  onChange={(e) =>
+                    mutate((d) => {
+                      d.meta.showLegend = e.target.checked;
+                    })
+                  }
+                  className="accent-water-600"
+                />
+                Show legend
+              </label>
+              <label className="flex items-center gap-2 text-xs text-water-900">
+                <input
+                  type="checkbox"
+                  checked={showPrintArea}
+                  onChange={togglePrintArea}
+                  className="accent-water-600"
+                />
+                Show print area
+              </label>
+            </div>
+          </details>
+          <details className="relative">
+            <summary
+              className="cursor-pointer list-none rounded border border-water-200 px-2 py-1 text-xs text-water-900 hover:bg-water-100"
+              title="Export"
+            >
               Export ▾
             </summary>
-            <div className="absolute right-0 z-20 mt-1 flex w-44 flex-col rounded border border-water-200 bg-white shadow">
+            <div className="absolute right-0 z-20 mt-1 flex w-40 flex-col rounded border border-water-200 bg-white shadow">
               <button
                 type="button"
                 onClick={() => exportSiteAsJsonDownload(site)}
@@ -205,12 +232,12 @@ export default function EditorPage() {
           <button
             type="button"
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            title={sidebarCollapsed ? 'Show inspector & layers' : 'Hide inspector & layers'}
+            aria-label={sidebarCollapsed ? 'Show inspector & layers' : 'Hide inspector & layers'}
             aria-pressed={!sidebarCollapsed}
             className="rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
           >
-            Sidebar {sidebarCollapsed ? '◂' : '▸'}
+            Details {sidebarCollapsed ? '◂' : '▸'}
           </button>
         </div>
       </header>
@@ -231,5 +258,51 @@ export default function EditorPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function IconShell({ children, ...rest }: SVGProps<SVGSVGElement> & { children: React.ReactNode }) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...rest}
+    >
+      {children}
+    </svg>
+  );
+}
+
+function UndoIcon() {
+  return (
+    <IconShell>
+      <polyline points="9,5 4,10 9,15" />
+      <path d="M 4 10 H 14 a 6 6 0 0 1 0 12 H 8" />
+    </IconShell>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <IconShell>
+      <polyline points="15,5 20,10 15,15" />
+      <path d="M 20 10 H 10 a 6 6 0 0 0 0 12 H 16" />
+    </IconShell>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <IconShell>
+      <circle cx={12} cy={12} r={3} />
+      <path d="M 19.4 15 a 1.65 1.65 0 0 0 0.33 1.82 l 0.06 0.06 a 2 2 0 1 1 -2.83 2.83 l -0.06 -0.06 a 1.65 1.65 0 0 0 -1.82 -0.33 a 1.65 1.65 0 0 0 -1 1.51 V 21 a 2 2 0 0 1 -4 0 v -0.09 a 1.65 1.65 0 0 0 -1 -1.51 a 1.65 1.65 0 0 0 -1.82 0.33 l -0.06 0.06 a 2 2 0 1 1 -2.83 -2.83 l 0.06 -0.06 a 1.65 1.65 0 0 0 0.33 -1.82 a 1.65 1.65 0 0 0 -1.51 -1 H 3 a 2 2 0 0 1 0 -4 h 0.09 a 1.65 1.65 0 0 0 1.51 -1 a 1.65 1.65 0 0 0 -0.33 -1.82 l -0.06 -0.06 a 2 2 0 1 1 2.83 -2.83 l 0.06 0.06 a 1.65 1.65 0 0 0 1.82 0.33 H 9 a 1.65 1.65 0 0 0 1 -1.51 V 3 a 2 2 0 0 1 4 0 v 0.09 a 1.65 1.65 0 0 0 1 1.51 a 1.65 1.65 0 0 0 1.82 -0.33 l 0.06 -0.06 a 2 2 0 1 1 2.83 2.83 l -0.06 0.06 a 1.65 1.65 0 0 0 -0.33 1.82 V 9 a 1.65 1.65 0 0 0 1.51 1 H 21 a 2 2 0 0 1 0 4 h -0.09 a 1.65 1.65 0 0 0 -1.51 1 z" />
+    </IconShell>
   );
 }

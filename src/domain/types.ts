@@ -119,6 +119,7 @@ export type POIType =
   | 'structure'
   | 'anchor'
   | 'mooring'
+  | 'entry_exit'
   | 'landmark'
   | 'other';
 

@@ -81,11 +81,12 @@ export default function ViewerPage() {
           <button
             type="button"
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            title={sidebarCollapsed ? 'Show inspector & layers' : 'Hide inspector & layers'}
+            aria-label={sidebarCollapsed ? 'Show inspector & layers' : 'Hide inspector & layers'}
             aria-pressed={!sidebarCollapsed}
             className="shrink-0 rounded border border-water-200 px-2 py-1 text-xs text-water-700 hover:bg-water-100"
           >
-            Sidebar {sidebarCollapsed ? '◂' : '▸'}
+            Details {sidebarCollapsed ? '◂' : '▸'}
           </button>
         </div>
       </header>

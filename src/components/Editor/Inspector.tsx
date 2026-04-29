@@ -215,13 +215,21 @@ function PoiEditor({ poi }: { poi: POI }) {
           value={poi.type}
           onChange={(e) => update((p) => void (p.type = e.target.value as POI['type']))}
         >
-          {['wreck', 'vehicle', 'natural', 'structure', 'anchor', 'mooring', 'landmark', 'other'].map(
-            (t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ),
-          )}
+          {[
+            { v: 'wreck', label: 'Wreck' },
+            { v: 'vehicle', label: 'Vehicle' },
+            { v: 'natural', label: 'Natural feature' },
+            { v: 'structure', label: 'Structure' },
+            { v: 'anchor', label: 'Anchor' },
+            { v: 'mooring', label: 'Mooring' },
+            { v: 'entry_exit', label: 'Entry / exit point' },
+            { v: 'landmark', label: 'Landmark' },
+            { v: 'other', label: 'Other' },
+          ].map((t) => (
+            <option key={t.v} value={t.v}>
+              {t.label}
+            </option>
+          ))}
         </select>
       </Field>
       <Field label="Depth (m)">
