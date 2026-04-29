@@ -105,9 +105,16 @@ function NoteCallout({
     ev.currentTarget.releasePointerCapture(ev.pointerId);
   };
 
-  const truncated = text.slice(0, 30);
-  const w = Math.min(60, Math.max(8, truncated.length * 1.4 + 4));
-  const h = 6.5;
+  // Multi-line: split on newlines, size the box to the longest line + line count.
+  const rawLines = text.split('\n');
+  const lines = rawLines.length === 0 ? [''] : rawLines;
+  const longestLineChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  const fontSize = 3;
+  const lineHeight = fontSize * 1.2;
+  const padX = 1.5;
+  const padY = 1.2;
+  const w = Math.max(8, longestLineChars * 1.4 + padX * 2);
+  const h = lines.length * lineHeight + padY * 2;
   const transparent = color === 'transparent' || bgOpacity <= 0;
   return (
     <g data-note={id}>
@@ -150,14 +157,21 @@ function NoteCallout({
         )}
         <text
           x={0}
-          y={0}
-          fontSize={3}
+          fontSize={fontSize}
           textAnchor="middle"
-          dominantBaseline="central"
           fill={textColor}
           fontFamily="ui-sans-serif, system-ui"
         >
-          {truncated}
+          {lines.map((line, i) => (
+            <tspan
+              key={i}
+              x={0}
+              y={(i - (lines.length - 1) / 2) * lineHeight}
+              dominantBaseline="central"
+            >
+              {line || ' '}
+            </tspan>
+          ))}
         </text>
       </g>
       {connector && !readOnly && selected && (
