@@ -8,9 +8,7 @@ export function IllustrationLayerView() {
   const layer = useSiteStore((s) => s.site.layers.illustrations);
   const selection = useSiteStore((s) => s.editor.selection);
   const setSelection = useSiteStore((s) => s.setSelection);
-  const activeLayer = useSiteStore((s) => s.editor.activeLayer);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
-  const isLayerActive = activeLayer === 'illustrations';
 
   return (
     <g data-layer="illustrations">
@@ -24,7 +22,7 @@ export function IllustrationLayerView() {
           ev.stopPropagation();
           setSelection({ kind: 'illustration', id: it.id });
         };
-        const showHandles = isSelected && isLayerActive && !layer.locked && !readOnly;
+        const showHandles = isSelected && !layer.locked && !readOnly;
         const showRotationHandle = showHandles && it.primitive !== 'circle';
         return (
           <g

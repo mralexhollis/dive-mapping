@@ -63,22 +63,12 @@ export default function ContourGeneratorDialog({ onClose }: Props) {
     const next = generateContours(all, { depths });
     mutate((d) => {
       d.layers.depth.contours = mergeContours(d.layers.depth.contours, next);
-      // Replace any auto-derived depth labels; preserve manual ones.
-      const manual = (d.layers.depth.labels ?? []).filter((l) => l.origin !== 'derived');
-      const derived = next
-        .filter((c) => c.points.length > 0)
-        .map((c) => {
-          const mid = c.points[Math.floor(c.points.length / 2)]!;
-          return {
-            id: crypto.randomUUID(),
-            x: mid.x,
-            y: mid.y,
-            depth: c.depth,
-            origin: 'derived' as const,
-            kind: 'contour' as const,
-          };
-        });
-      d.layers.depth.labels = [...manual, ...derived];
+      // Contour lines now render their own depth label, so we no longer
+      // create separate `DepthLabel` entries for them. Remove any leftover
+      // derived labels from earlier versions; manual reference labels stay.
+      d.layers.depth.labels = (d.layers.depth.labels ?? []).filter(
+        (l) => l.origin !== 'derived',
+      );
     });
     setPreviewCount(next.length);
   };

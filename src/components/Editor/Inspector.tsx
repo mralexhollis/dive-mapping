@@ -412,13 +412,22 @@ function ContourEditor({ contour }: { contour: ContourLine }) {
           onChange={(e) => update((c) => void (c.depth = Number(e.target.value)))}
         />
       </Field>
-      <Field label="Label">
+      <Field label="Label override">
         <input
           className={inputClass}
+          placeholder={`${contour.depth}m`}
           value={contour.label ?? ''}
           onChange={(e) => update((c) => void (c.label = e.target.value || undefined))}
         />
       </Field>
+      <label className="flex items-center gap-2 text-sm text-water-900">
+        <input
+          type="checkbox"
+          checked={!!contour.labelHidden}
+          onChange={(e) => update((c) => void (c.labelHidden = e.target.checked))}
+        />
+        Hide depth label on canvas
+      </label>
       <Field label="Closed loop">
         <input
           type="checkbox"

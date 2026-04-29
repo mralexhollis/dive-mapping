@@ -35,9 +35,7 @@ export function WaterBodyLayerView() {
   const setSelection = useSiteStore((s) => s.setSelection);
   const tool = useSiteStore((s) => s.editor.tool);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
-  const activeLayer = useSiteStore((s) => s.editor.activeLayer);
   const pendingPolyline = useSiteStore((s) => s.editor.pendingPolyline);
-  const isWaterActive = activeLayer === 'waterBody';
 
   return (
     <g data-layer="waterBody">
@@ -70,7 +68,7 @@ export function WaterBodyLayerView() {
               strokeDasharray={style.dash}
               pointerEvents="none"
             />
-            {isSelected && isWaterActive && !layer.locked && !readOnly && (
+            {isSelected && !layer.locked && !readOnly && (
               <EditHandles path={path} tool={tool} />
             )}
           </g>

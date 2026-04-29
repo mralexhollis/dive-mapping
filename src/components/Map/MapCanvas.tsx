@@ -51,7 +51,7 @@ export default function MapCanvas({ interactive = true }: MapCanvasProps) {
   // World-rotate by -northBearingDeg so the bearing-N direction in world coords
   // ends up pointing screen-up after the user requests it.
   const transform = `translate(${viewport.x} ${viewport.y}) scale(${viewport.scale}) rotate(${-northDeg})`;
-  const gridSize = site.meta.gridSpacingMeters ?? 20;
+  const gridSize = site.meta.gridSpacingMeters ?? 5;
 
   const onBackgroundPointerDown = (ev: React.PointerEvent<SVGRectElement>) => {
     if (!interactive) return;
@@ -471,7 +471,7 @@ function handleBackgroundClick(world: Point) {
       let target = world;
       const snapping = !!store.site.layers.measurements.snapToGridCenter;
       if (snapping) {
-        const g = store.site.meta.gridSpacingMeters ?? 20;
+        const g = store.site.meta.gridSpacingMeters ?? 5;
         target = {
           x: Math.floor(world.x / g) * g + g / 2,
           y: Math.floor(world.y / g) * g + g / 2,

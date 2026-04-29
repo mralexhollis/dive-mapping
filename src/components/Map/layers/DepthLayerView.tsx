@@ -9,8 +9,6 @@ export function DepthLayerView() {
   const selection = useSiteStore((s) => s.editor.selection);
   const tool = useSiteStore((s) => s.editor.tool);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
-  const activeLayer = useSiteStore((s) => s.editor.activeLayer);
-  const isLayerActive = activeLayer === 'depth';
   const pendingPolyline = useSiteStore((s) => s.editor.pendingPolyline);
   const setSelection = useSiteStore((s) => s.setSelection);
   const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
@@ -50,19 +48,29 @@ export function DepthLayerView() {
                 strokeDasharray={c.origin === 'derived' ? '1.5 1' : undefined}
                 pointerEvents="none"
               />
-              {c.label && c.points.length > 0 && (
+              {!c.labelHidden && c.points.length > 0 && (
                 <text
                   x={c.points[Math.floor(c.points.length / 2)]!.x}
                   y={c.points[Math.floor(c.points.length / 2)]!.y - 1}
                   fontSize={3}
-                  className={isSelected ? 'fill-amber-900' : 'fill-water-900'}
+                  textAnchor="middle"
+                  className={
+                    isSelected
+                      ? 'fill-amber-900 font-semibold'
+                      : c.origin === 'derived'
+                      ? 'fill-water-700 font-semibold'
+                      : 'fill-water-900 font-semibold'
+                  }
                   fontFamily="ui-sans-serif, system-ui"
+                  stroke="white"
+                  strokeWidth={0.4}
+                  paintOrder="stroke"
                   pointerEvents="none"
                 >
-                  {c.label}
+                  {c.label ?? `${c.depth}m`}
                 </text>
               )}
-              {isSelected && isLayerActive && !layer.locked && !readOnly && (
+              {isSelected && !layer.locked && !readOnly && (
                 <ContourEditHandles contour={c} tool={tool} />
               )}
             </g>

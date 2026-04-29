@@ -52,7 +52,10 @@ export interface DepthSounding {
 export interface ContourLine {
   id: UUID;
   depth: number;
+  /** Optional override for the on-canvas label. Defaults to "{depth}m". */
   label?: string;
+  /** When true, no label is drawn on the canvas for this contour. */
+  labelHidden?: boolean;
   points: Point[];
   closed?: boolean;
   origin: 'manual' | 'derived';
@@ -300,6 +303,7 @@ export function emptySite(name = 'Untitled site'): Site {
       name,
       northBearingDeg: 0,
       scaleMetersPerUnit: 1,
+      gridSpacingMeters: 5,
       createdAt: now,
       updatedAt: now,
     },

@@ -40,7 +40,7 @@ export default function EditorPage() {
 
   const findSvg = () => document.querySelector('svg[data-map-canvas]') as SVGSVGElement | null;
   const mutate = useSiteStore((s) => s.mutateSite);
-  const gridMeters = site.meta.gridSpacingMeters ?? 20;
+  const gridMeters = site.meta.gridSpacingMeters ?? 5;
   const showLegend = !!site.meta.showLegend;
   const showPrintArea = useSiteStore((s) => s.editor.showPrintArea);
   const setShowPrintArea = useSiteStore((s) => s.setShowPrintArea);
