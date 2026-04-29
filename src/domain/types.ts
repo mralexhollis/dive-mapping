@@ -58,6 +58,8 @@ export interface ContourLine {
   labelHidden?: boolean;
   /** Where the label sits along the line, 0 = start, 1 = end. Defaults to 0.5. */
   labelOffset?: number;
+  /** How many times the label repeats along the line (1..5). Defaults to 1. */
+  labelRepeat?: number;
   points: Point[];
   closed?: boolean;
   origin: 'manual' | 'derived';

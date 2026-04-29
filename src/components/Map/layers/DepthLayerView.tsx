@@ -49,34 +49,40 @@ export function DepthLayerView() {
                 pointerEvents="none"
               />
               {!c.labelHidden && c.points.length > 0 && (() => {
-                const p = pointAlongPolyline(
-                  c.points,
-                  !!c.closed,
-                  c.labelOffset ?? 0.5,
-                );
-                return (
-                  <text
-                    x={p.x}
-                    y={p.y}
-                    fontSize={3}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    className={
-                      isSelected
-                        ? 'fill-amber-900 font-semibold'
-                        : c.origin === 'derived'
-                        ? 'fill-water-700 font-semibold'
-                        : 'fill-water-900 font-semibold'
-                    }
-                    fontFamily="ui-sans-serif, system-ui"
-                    stroke="white"
-                    strokeWidth={0.4}
-                    paintOrder="stroke"
-                    pointerEvents="none"
-                  >
-                    {c.label ?? `${c.depth}m`}
-                  </text>
-                );
+                const text = c.label ?? `${c.depth}m`;
+                const offset = c.labelOffset ?? 0.5;
+                const repeat = Math.max(1, Math.min(5, c.labelRepeat ?? 1));
+                const positions: number[] = [];
+                for (let k = 0; k < repeat; k++) {
+                  positions.push((offset + k / repeat) % 1);
+                }
+                return positions.map((t, i) => {
+                  const p = pointAlongPolyline(c.points, !!c.closed, t);
+                  return (
+                    <text
+                      key={i}
+                      x={p.x}
+                      y={p.y}
+                      fontSize={3}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      className={
+                        isSelected
+                          ? 'fill-amber-900 font-semibold'
+                          : c.origin === 'derived'
+                          ? 'fill-water-700 font-semibold'
+                          : 'fill-water-900 font-semibold'
+                      }
+                      fontFamily="ui-sans-serif, system-ui"
+                      stroke="white"
+                      strokeWidth={0.4}
+                      paintOrder="stroke"
+                      pointerEvents="none"
+                    >
+                      {text}
+                    </text>
+                  );
+                });
               })()}
               {isSelected && !layer.locked && !readOnly && (
                 <ContourEditHandles contour={c} tool={tool} />

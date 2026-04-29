@@ -44,6 +44,7 @@ const contourLine = z
     label: z.string().optional(),
     labelHidden: z.boolean().optional(),
     labelOffset: z.number().min(0).max(1).optional(),
+    labelRepeat: z.number().int().min(1).max(5).optional(),
     points: z.array(point),
     closed: z.boolean().optional(),
     origin: z.enum(['manual', 'derived']),
