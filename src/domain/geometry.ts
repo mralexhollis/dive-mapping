@@ -114,6 +114,43 @@ export function nearestSegment(points: Point[], closed: boolean, target: Point):
   return { insertIdx: bestIdx, point: bestPoint, distance: bestDist };
 }
 
+/**
+ * Point at parametric position `t` (0..1) along a polyline. For `closed`
+ * polylines the path wraps back to `points[0]`.
+ */
+export function pointAlongPolyline(points: Point[], closed: boolean, t: number): Point {
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return { ...points[0]! };
+  const n = points.length;
+  const segCount = closed ? n : n - 1;
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < segCount; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % n]!;
+    const l = Math.hypot(b.x - a.x, b.y - a.y);
+    lengths.push(l);
+    total += l;
+  }
+  if (total === 0) return { ...points[0]! };
+  const clamped = Math.max(0, Math.min(1, t));
+  let target = clamped * total;
+  for (let i = 0; i < segCount; i++) {
+    const segLen = lengths[i]!;
+    if (target <= segLen || i === segCount - 1) {
+      const a = points[i]!;
+      const b = points[(i + 1) % n]!;
+      const frac = segLen === 0 ? 0 : Math.max(0, Math.min(1, target / segLen));
+      return {
+        x: a.x + (b.x - a.x) * frac,
+        y: a.y + (b.y - a.y) * frac,
+      };
+    }
+    target -= segLen;
+  }
+  return { ...points[segCount]! };
+}
+
 /** Centroid (arithmetic mean) of a list of points. */
 export function centroid(points: Point[]): Point {
   if (points.length === 0) return { x: 0, y: 0 };

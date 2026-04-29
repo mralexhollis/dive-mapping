@@ -426,8 +426,23 @@ function ContourEditor({ contour }: { contour: ContourLine }) {
           checked={!!contour.labelHidden}
           onChange={(e) => update((c) => void (c.labelHidden = e.target.checked))}
         />
-        Hide depth label on canvas
+        Hide label
       </label>
+      {!contour.labelHidden && (
+        <Field label={`Label position along line (${Math.round((contour.labelOffset ?? 0.5) * 100)}%)`}>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={contour.labelOffset ?? 0.5}
+            onChange={(e) =>
+              update((c) => void (c.labelOffset = Number(e.target.value)))
+            }
+            className="w-full accent-water-600"
+          />
+        </Field>
+      )}
       <Field label="Closed loop">
         <input
           type="checkbox"

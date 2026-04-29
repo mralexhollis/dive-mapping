@@ -56,6 +56,8 @@ export interface ContourLine {
   label?: string;
   /** When true, no label is drawn on the canvas for this contour. */
   labelHidden?: boolean;
+  /** Where the label sits along the line, 0 = start, 1 = end. Defaults to 0.5. */
+  labelOffset?: number;
   points: Point[];
   closed?: boolean;
   origin: 'manual' | 'derived';

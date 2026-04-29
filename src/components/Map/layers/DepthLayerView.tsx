@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useSiteStore } from '../../../state/useSiteStore';
 import type { ContourLine, Point } from '../../../domain/types';
-import { centroid } from '../../../domain/geometry';
+import { centroid, pointAlongPolyline } from '../../../domain/geometry';
 import { clientToWorld } from '../../../utils/coords';
 
 export function DepthLayerView() {
@@ -48,28 +48,36 @@ export function DepthLayerView() {
                 strokeDasharray={c.origin === 'derived' ? '1.5 1' : undefined}
                 pointerEvents="none"
               />
-              {!c.labelHidden && c.points.length > 0 && (
-                <text
-                  x={c.points[Math.floor(c.points.length / 2)]!.x}
-                  y={c.points[Math.floor(c.points.length / 2)]!.y - 1}
-                  fontSize={3}
-                  textAnchor="middle"
-                  className={
-                    isSelected
-                      ? 'fill-amber-900 font-semibold'
-                      : c.origin === 'derived'
-                      ? 'fill-water-700 font-semibold'
-                      : 'fill-water-900 font-semibold'
-                  }
-                  fontFamily="ui-sans-serif, system-ui"
-                  stroke="white"
-                  strokeWidth={0.4}
-                  paintOrder="stroke"
-                  pointerEvents="none"
-                >
-                  {c.label ?? `${c.depth}m`}
-                </text>
-              )}
+              {!c.labelHidden && c.points.length > 0 && (() => {
+                const p = pointAlongPolyline(
+                  c.points,
+                  !!c.closed,
+                  c.labelOffset ?? 0.5,
+                );
+                return (
+                  <text
+                    x={p.x}
+                    y={p.y}
+                    fontSize={3}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    className={
+                      isSelected
+                        ? 'fill-amber-900 font-semibold'
+                        : c.origin === 'derived'
+                        ? 'fill-water-700 font-semibold'
+                        : 'fill-water-900 font-semibold'
+                    }
+                    fontFamily="ui-sans-serif, system-ui"
+                    stroke="white"
+                    strokeWidth={0.4}
+                    paintOrder="stroke"
+                    pointerEvents="none"
+                  >
+                    {c.label ?? `${c.depth}m`}
+                  </text>
+                );
+              })()}
               {isSelected && !layer.locked && !readOnly && (
                 <ContourEditHandles contour={c} tool={tool} />
               )}
