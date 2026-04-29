@@ -614,6 +614,28 @@ function IllustrationEditor({ it }: { it: Illustration }) {
   );
 }
 
+const NOTE_BG_PRESETS = [
+  '#fef3c7', // amber-100 (default)
+  '#fde68a', // amber-200
+  '#fee2e2', // red-100
+  '#dcfce7', // green-100
+  '#dbeafe', // blue-100
+  '#e9d5ff', // purple-100
+  '#f5f5f5', // neutral-100
+  '#1f2937', // slate-800 (dark)
+] as const;
+
+const NOTE_TEXT_PRESETS = [
+  '#7c2d12', // amber-900 (default)
+  '#1f2937', // slate-800
+  '#7f1d1d', // red-900
+  '#14532d', // green-900
+  '#1e3a8a', // blue-900
+  '#581c87', // purple-900
+  '#000000', // black
+  '#ffffff', // white
+] as const;
+
 function NoteEditor({ note }: { note: Note }) {
   const mutate = useSiteStore((s) => s.mutateSite);
   const update = (fn: (n: Note) => void) =>
@@ -621,6 +643,10 @@ function NoteEditor({ note }: { note: Note }) {
       const n = d.layers.notes.notes.find((n) => n.id === note.id);
       if (n) fn(n);
     });
+  const bg = note.color ?? '#fef3c7';
+  const txt = note.textColor ?? '#7c2d12';
+  const opacity = note.bgOpacity ?? 1;
+  const transparent = bg === 'transparent';
   return (
     <div className="space-y-3 text-sm">
       <Field label="Text">
@@ -630,14 +656,112 @@ function NoteEditor({ note }: { note: Note }) {
           onChange={(e) => update((n) => void (n.text = e.target.value))}
         />
       </Field>
-      <Field label="Color">
-        <input
-          type="color"
-          className="h-8 w-16 cursor-pointer rounded border border-water-200"
-          value={note.color ?? '#fef3c7'}
-          onChange={(e) => update((n) => void (n.color = e.target.value))}
-        />
+      <Field label="Background">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-1">
+            {NOTE_BG_PRESETS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => update((n) => void (n.color = c))}
+                title={c}
+                className={`h-6 w-6 rounded border ${
+                  bg === c ? 'border-water-700 ring-2 ring-water-300' : 'border-water-300'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() => update((n) => void (n.color = 'transparent'))}
+              title="No background"
+              className={`flex h-6 w-6 items-center justify-center rounded border bg-white text-[9px] uppercase tracking-tight ${
+                transparent ? 'border-water-700 ring-2 ring-water-300' : 'border-water-300'
+              }`}
+            >
+              none
+            </button>
+            <input
+              type="color"
+              value={transparent ? '#fef3c7' : bg}
+              onChange={(e) => update((n) => void (n.color = e.target.value))}
+              className="h-6 w-9 cursor-pointer rounded border border-water-300"
+              title="Custom colour"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-water-700">
+            <span className="w-16 shrink-0">Transparency</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={opacity}
+              onChange={(e) =>
+                update((n) => void (n.bgOpacity = Number(e.target.value)))
+              }
+              className="flex-1 accent-water-600"
+              disabled={transparent}
+            />
+            <span className="w-9 text-right">{Math.round(opacity * 100)}%</span>
+          </label>
+        </div>
       </Field>
+      <Field label="Text colour">
+        <div className="flex flex-wrap items-center gap-1">
+          {NOTE_TEXT_PRESETS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => update((n) => void (n.textColor = c))}
+              title={c}
+              className={`h-6 w-6 rounded border ${
+                txt === c ? 'border-water-700 ring-2 ring-water-300' : 'border-water-300'
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <input
+            type="color"
+            value={txt}
+            onChange={(e) => update((n) => void (n.textColor = e.target.value))}
+            className="h-6 w-9 cursor-pointer rounded border border-water-300"
+            title="Custom colour"
+          />
+        </div>
+      </Field>
+      <Field label="Connector">
+        <select
+          className={inputClass}
+          value={note.connector?.style ?? 'none'}
+          onChange={(e) => {
+            const v = e.target.value;
+            update((n) => {
+              if (v === 'none') {
+                n.connector = undefined;
+              } else {
+                const target =
+                  n.connector?.target ??
+                  // Default offset: 30 world units down-right of the note.
+                  (n.position
+                    ? { x: n.position.x + 30, y: n.position.y + 30 }
+                    : { x: 30, y: 30 });
+                n.connector = { target, style: v as 'line' | 'arrow' | 'dot' };
+              }
+            });
+          }}
+        >
+          <option value="none">None</option>
+          <option value="line">Line</option>
+          <option value="arrow">Arrow</option>
+          <option value="dot">Dot</option>
+        </select>
+      </Field>
+      {note.connector && (
+        <p className="text-xs text-water-700">
+          Drag the amber dot on the canvas to position the connector target.
+        </p>
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ export function POILayerView({ positions }: POILayerViewProps) {
   const pendingBearingFrom = useSiteStore((s) => s.editor.pendingBearingFromId);
   const pendingSubPoiParent = useSiteStore((s) => s.editor.pendingSubPoiParentId);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
+  const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
   const isLayerActive = activeLayer === 'poi';
   const isSubPoiActive = activeLayer === 'subPoi';
 
@@ -73,6 +74,7 @@ export function POILayerView({ positions }: POILayerViewProps) {
               pending={isPending}
               draggable={tool === 'select' && !layer.locked && !readOnly}
               tool={effectiveTool}
+              northDeg={northDeg}
             />
           );
         })}
@@ -92,6 +94,7 @@ interface PoiNodeProps {
   tool: string | null;
   number?: number;
   labelPosition?: POILabelPosition;
+  northDeg: number;
 }
 
 function PoiNode({
@@ -105,6 +108,7 @@ function PoiNode({
   tool,
   number,
   labelPosition,
+  northDeg,
 }: PoiNodeProps) {
   const setSelection = useSiteStore((s) => s.setSelection);
   const setPendingFrom = useSiteStore((s) => s.setPendingBearingFrom);
@@ -200,28 +204,33 @@ function PoiNode({
         className={fillClass}
         strokeWidth={selected || pending ? 0.7 : 0.5}
       />
-      {number != null && (
-        <text
-          x={0}
-          y={1.2}
-          fontSize={3.6}
-          textAnchor="middle"
-          className="fill-white"
-          fontFamily="ui-sans-serif, system-ui"
-          fontWeight={600}
-          pointerEvents="none"
-        >
-          {number}
-        </text>
-      )}
-      {labelPosition !== 'hidden' && (
-        <PoiLabel
-          name={name}
-          depth={depth}
-          position={labelPosition ?? 'right'}
-          selected={selected}
-        />
-      )}
+      {/* Counter-rotate everything else by +northDeg so the number + label
+          read horizontally regardless of the screen-bearing rotation. */}
+      <g transform={`rotate(${northDeg})`}>
+        {number != null && (
+          <text
+            x={0}
+            y={0}
+            fontSize={3.6}
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-white"
+            fontFamily="ui-sans-serif, system-ui"
+            fontWeight={600}
+            pointerEvents="none"
+          >
+            {number}
+          </text>
+        )}
+        {labelPosition !== 'hidden' && (
+          <PoiLabel
+            name={name}
+            depth={depth}
+            position={labelPosition ?? 'right'}
+            selected={selected}
+          />
+        )}
+      </g>
     </g>
   );
 }
@@ -324,6 +333,7 @@ function formatMetersShort(m: number): string {
 
 function BearingEdge({ id, from, to, bearingDeg, reverseDeg, dashed, label, selected }: BearingEdgeProps) {
   const setSelection = useSiteStore((s) => s.setSelection);
+  const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
   const reverse = reverseDeg ?? (bearingDeg + 180) % 360;
   const onPointerDown = (ev: React.PointerEvent<SVGElement>) => {
     if (ev.button !== 0) return;
@@ -338,8 +348,12 @@ function BearingEdge({ id, from, to, bearingDeg, reverseDeg, dashed, label, sele
   // The "above the line" perpendicular in screen coords (y-down) is (dy, -dx) / len.
   let nx = dy / len;
   let ny = -dx / len;
-  // Flip the label when the line points leftward so text isn't upside-down.
-  if (angle > 90 || angle < -90) {
+  // Flip the label when the *screen* angle of the line points leftward, so
+  // the text isn't upside-down. The world rotates by -northDeg before reaching
+  // the screen, so subtract that to get the screen angle.
+  const screenAngle = angle - northDeg;
+  const normSA = ((screenAngle + 180) % 360 + 360) % 360 - 180; // (-180, 180]
+  if (normSA > 90 || normSA < -90) {
     angle += 180;
     nx = -nx;
     ny = -ny;

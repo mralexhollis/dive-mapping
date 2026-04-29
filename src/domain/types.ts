@@ -227,12 +227,27 @@ export interface IllustrationLayer extends LayerMeta {
 
 export type NoteAttachKind = 'poi' | 'subpoi' | 'contour';
 
+export type NoteConnectorStyle = 'line' | 'arrow' | 'dot';
+
+export interface NoteConnector {
+  /** World position the connector points TO. Independent of the note's own position. */
+  target: Point;
+  style: NoteConnectorStyle;
+}
+
 export interface Note {
   id: UUID;
   attachTo?: { kind: NoteAttachKind; id: UUID };
   position?: Point;
   text: string;
+  /** Background colour. Use 'transparent' to suppress the box; default `#fef3c7`. */
   color?: string;
+  /** 0..1 opacity for the background fill. Defaults to 1. */
+  bgOpacity?: number;
+  /** Text colour. Defaults to `#7c2d12` (amber-900). */
+  textColor?: string;
+  /** Optional connector with a draggable target. */
+  connector?: NoteConnector;
   createdAt: string;
 }
 

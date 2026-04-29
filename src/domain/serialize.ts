@@ -198,6 +198,14 @@ const note = z
     position: point.optional(),
     text: z.string(),
     color: z.string().optional(),
+    bgOpacity: z.number().min(0).max(1).optional(),
+    textColor: z.string().optional(),
+    connector: z
+      .object({
+        target: point,
+        style: z.enum(['line', 'arrow', 'dot']),
+      })
+      .optional(),
     createdAt: z.string(),
   })
   .passthrough();

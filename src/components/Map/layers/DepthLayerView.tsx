@@ -9,6 +9,7 @@ export function DepthLayerView() {
   const selection = useSiteStore((s) => s.editor.selection);
   const tool = useSiteStore((s) => s.editor.tool);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
+  const labelNorthDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
   const pendingPolyline = useSiteStore((s) => s.editor.pendingPolyline);
   const setSelection = useSiteStore((s) => s.setSelection);
   const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
@@ -66,6 +67,7 @@ export function DepthLayerView() {
                       fontSize={3}
                       textAnchor="middle"
                       dominantBaseline="central"
+                      transform={`rotate(${labelNorthDeg} ${p.x} ${p.y})`}
                       className={
                         isSelected
                           ? 'fill-amber-900 font-semibold'
