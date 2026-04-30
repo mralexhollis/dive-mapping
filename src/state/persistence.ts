@@ -259,6 +259,10 @@ function resolveExportPrintArea(
     include(it.x, it.y);
     include(it.x + it.width, it.y + it.height);
   }
+  for (const it of site.layers.references.items) {
+    include(it.x, it.y);
+    include(it.x + it.width, it.y + it.height);
+  }
   for (const n of site.layers.notes.notes) {
     if (n.position) include(n.position.x, n.position.y);
   }
@@ -442,7 +446,19 @@ function buildExportCompass(area: Rect, northDeg: number): SVGElement {
 function buildExportLegend(area: Rect, site: Site): SVGElement | null {
   const ordered = [...site.layers.poi.pois]
     .filter((p) => p.number != null)
-    .sort((a, b) => a.number! - b.number!);
+    .sort((a, b) => {
+      const av = a.number;
+      const bv = b.number;
+      const aNum = typeof av === 'number';
+      const bNum = typeof bv === 'number';
+      if (aNum && bNum) return (av as number) - (bv as number);
+      if (aNum) return -1;
+      if (bNum) return 1;
+      return String(av ?? '').localeCompare(String(bv ?? ''), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
   if (ordered.length === 0) return null;
   const margin = Math.max(area.width, area.height) * 0.025;
   const lineH = Math.max(area.width, area.height) * 0.025;
@@ -451,7 +467,18 @@ function buildExportLegend(area: Rect, site: Site): SVGElement | null {
   const headerSize = lineH * 0.85;
   const rowSize = lineH * 0.7;
   const boxW = Math.min(area.width * 0.32, lineH * 14);
-  const boxH = padY * 2 + headerSize + ordered.length * lineH;
+  // Word-wrap each label up-front so the legend grows in height to fit and
+  // long POI names don't run off the right edge of the box.
+  const maxChars = Math.max(12, Math.floor(boxW / (rowSize * 0.55)));
+  const wrapped = ordered.map((p) => ({
+    poi: p,
+    lines: wrapLegendLabel(
+      `${p.number}. ${p.name}${p.depth != null ? ` (${p.depth} m)` : ''}`,
+      maxChars,
+    ),
+  }));
+  const totalLines = wrapped.reduce((acc, w) => acc + w.lines.length, 0);
+  const boxH = padY * 2 + headerSize + totalLines * lineH;
   const x = area.x + area.width - margin - boxW;
   const y = area.y + margin;
   const stroke = Math.max(0.3, lineH * 0.04);
@@ -479,23 +506,66 @@ function buildExportLegend(area: Rect, site: Site): SVGElement | null {
       ['Legend'],
     ),
   ];
-  ordered.forEach((p, i) => {
-    const text = `${p.number}. ${p.name}${p.depth != null ? ` (${p.depth} m)` : ''}`;
+  let lineIdx = 0;
+  for (const { poi, lines } of wrapped) {
+    const start = lineIdx;
+    lineIdx += lines.length;
+    const tspans = lines.map((ln, i) =>
+      svgEl(
+        'tspan',
+        {
+          x: x + padX + (i === 0 ? 0 : padX),
+          dy: i === 0 ? 0 : lineH,
+        },
+        [ln],
+      ),
+    );
     children.push(
       svgEl(
         'text',
         {
           x: x + padX,
-          y: y + padY + headerSize + (i + 1) * lineH,
+          y: y + padY + headerSize + (start + 1) * lineH,
           'font-size': rowSize,
           fill: '#0f172a',
           'font-family': 'ui-sans-serif, system-ui, sans-serif',
         },
-        [text],
+        tspans,
       ),
     );
-  });
+    void poi;
+  }
   return svgEl('g', { 'data-export-overlay': 'legend' }, children);
+}
+
+function wrapLegendLabel(text: string, maxChars: number): string[] {
+  const words = text.split(/\s+/);
+  const out: string[] = [];
+  let line = '';
+  const flush = () => {
+    if (!line) return;
+    if (line.length <= maxChars) {
+      out.push(line);
+    } else {
+      for (let i = 0; i < line.length; i += maxChars) {
+        out.push(line.slice(i, i + maxChars));
+      }
+    }
+    line = '';
+  };
+  for (const w of words) {
+    if (!w) continue;
+    if (line.length === 0) {
+      line = w;
+    } else if (line.length + 1 + w.length <= maxChars) {
+      line += ' ' + w;
+    } else {
+      flush();
+      line = w;
+    }
+  }
+  flush();
+  return out.length > 0 ? out : [''];
 }
 
 function inlineComputedStyles(original: SVGSVGElement, clone: SVGSVGElement): void {

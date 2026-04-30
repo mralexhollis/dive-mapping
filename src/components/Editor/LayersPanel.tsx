@@ -3,6 +3,7 @@ import { useSiteStore, type Selection, type SelectionKind } from '../../state/us
 import type { LayerKey, Site } from '../../domain/types';
 
 const LAYER_LABELS: Record<LayerKey, string> = {
+  references: 'Reference imagery',
   waterBody: 'Water body',
   depth: 'Depth',
   measurements: 'Measurements',
@@ -80,13 +81,31 @@ function entitiesForLayer(site: Site, key: LayerKey): EntityRow[] {
         };
       });
     case 'illustrations':
-      return site.layers.illustrations.items.map((it, i) => ({
+      return [
+        ...site.layers.illustrations.items.map((it, i) => ({
+          kind: 'illustration' as const,
+          id: it.id,
+          label: it.caption || it.primitive || `Illustration ${i + 1}`,
+          sub: `${Math.round(it.width)}×${Math.round(it.height)}${
+            it.rotationDeg ? ` · ${Math.round(it.rotationDeg)}°` : ''
+          }`,
+        })),
+        ...(site.layers.illustrations.lines ?? []).map((ln, i) => {
+          const w = typeof ln.width === 'number' ? ln.width.toFixed(1) : `${ln.width}`;
+          return {
+            kind: 'illustrationLine' as const,
+            id: ln.id,
+            label: ln.label || `Line ${i + 1}`,
+            sub: `${ln.points.length} pts · w ${w}${ln.style === 'dashed' ? ' · dashed' : ''}`,
+          };
+        }),
+      ];
+    case 'references':
+      return site.layers.references.items.map((it, i) => ({
         kind: 'illustration',
         id: it.id,
-        label: it.caption || it.primitive || `Illustration ${i + 1}`,
-        sub: `${Math.round(it.width)}×${Math.round(it.height)}${
-          it.rotationDeg ? ` · ${Math.round(it.rotationDeg)}°` : ''
-        }`,
+        label: it.caption || `Reference ${i + 1}`,
+        sub: `${Math.round(it.width)}×${Math.round(it.height)} m`,
       }));
     case 'notes':
       return site.layers.notes.notes.map((n, i) => ({

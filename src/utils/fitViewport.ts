@@ -102,6 +102,10 @@ export function resolveDefaultPrintArea(site: Site): Rect | null {
     include(it.x, it.y);
     include(it.x + it.width, it.y + it.height);
   }
+  for (const it of site.layers.references.items) {
+    include(it.x, it.y);
+    include(it.x + it.width, it.y + it.height);
+  }
   for (const n of site.layers.notes.notes) {
     if (n.position) include(n.position.x, n.position.y);
   }
@@ -115,4 +119,21 @@ export function resolveDefaultPrintArea(site: Site): Rect | null {
     width: w + margin * 2,
     height: h + margin * 2,
   };
+}
+
+/** Default visible-area dimensions in metres for a brand-new, empty site. */
+const DEFAULT_EMPTY_WIDTH_M = 80;
+const DEFAULT_EMPTY_HEIGHT_M = 60;
+
+/**
+ * A diver-friendly default area for a freshly created site with no content
+ * yet. Centred on the world origin and sized for the kind of area a single
+ * dive actually covers (tens of metres, not hundreds), so the editor doesn't
+ * open zoomed out to a square kilometre of empty grid.
+ */
+export function defaultEmptyArea(site: Site): Rect {
+  const metersPerUnit = site.meta.scaleMetersPerUnit || 1;
+  const w = DEFAULT_EMPTY_WIDTH_M / metersPerUnit;
+  const h = DEFAULT_EMPTY_HEIGHT_M / metersPerUnit;
+  return { x: -w / 2, y: -h / 2, width: w, height: h };
 }

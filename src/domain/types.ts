@@ -89,7 +89,15 @@ export interface DepthLabel {
    * If absent, falls back to: `origin === 'derived' → 'contour'`.
    */
   kind?: DepthLabelKind;
+  /** Font size in world units. Defaults to {@link DEFAULT_DEPTH_LABEL_FONT_SIZE}. */
+  fontSize?: number;
 }
+
+/** Default depth-label font size in world units (matches the long-standing
+ * renderer default of 4). */
+export const DEFAULT_DEPTH_LABEL_FONT_SIZE = 4;
+export const DEPTH_LABEL_MIN_FONT_SIZE = 1.5;
+export const DEPTH_LABEL_MAX_FONT_SIZE = 12;
 
 export interface DepthLayer extends LayerMeta {
   grid?: DepthGrid;
@@ -127,8 +135,12 @@ export type POILabelPosition = 'right' | 'left' | 'above' | 'below' | 'hidden';
 
 export interface POI {
   id: UUID;
-  /** User-visible number drawn inside the marker. Unique per site. */
-  number?: number;
+  /**
+   * User-visible label drawn inside the marker. Typically a sequence number
+   * (1, 2, 3…) but can also be a letter or short string ("A", "B", "X1") so
+   * the user can hand-author legend ordering. Unique per site.
+   */
+  number?: number | string;
   name: string;
   type: POIType;
   depth?: number;
@@ -148,6 +160,8 @@ export interface Bearing {
   distanceM?: number;
   label?: string;
   style?: 'solid' | 'dashed';
+  /** Label text size in world units. Defaults to 3. */
+  labelFontSize?: number;
 }
 
 export interface POILayer extends LayerMeta {
@@ -219,7 +233,51 @@ export interface Illustration {
   caption?: string;
 }
 
+export type IllustrationLineStyle = 'solid' | 'dashed';
+export type IllustrationLineLabelPosition = 'above' | 'below' | 'on' | 'hidden';
+
+/** Min / max stroke width for illustration lines, in world units. */
+export const ILLUSTRATION_LINE_MIN_WIDTH = 0.3;
+export const ILLUSTRATION_LINE_MAX_WIDTH = 4.8;
+
+/**
+ * Polyline-style illustration: paths, roads, chains, lines. Renders as a
+ * naturally-curving stroke through its points, with optional text drawn
+ * along the path. Always open (never a closed loop).
+ */
+export interface IllustrationLine {
+  id: UUID;
+  points: Point[];
+  /**
+   * Stroke width in world units. Range
+   * `[ILLUSTRATION_LINE_MIN_WIDTH, ILLUSTRATION_LINE_MAX_WIDTH]`.
+   * Legacy data may carry the strings 'narrow' (0.5) or 'wide' (1.6) —
+   * those are migrated to numeric values on parse.
+   */
+  width: number;
+  /** Optional text drawn along the line. */
+  label?: string;
+  /** Where the label sits relative to the line. Defaults to 'above'. */
+  labelPosition?: IllustrationLineLabelPosition;
+  /** Stroke colour, default `#374151`. */
+  color?: string;
+  /** Stroke style — solid or dashed (good for chains / fences). */
+  style?: IllustrationLineStyle;
+}
+
 export interface IllustrationLayer extends LayerMeta {
+  items: Illustration[];
+  /** Polyline-style decorations: paths, roads, chains. Optional for legacy compat. */
+  lines?: IllustrationLine[];
+}
+
+/**
+ * Reference imagery (satellite tiles, screenshots from other mapping
+ * products, hand-drawn sketches the user wants as a backdrop). Same data
+ * shape as illustrations, but kept on a separate layer so the user can
+ * lock/hide guidance imagery independently of map decorations.
+ */
+export interface ReferenceLayer extends LayerMeta {
   items: Illustration[];
 }
 
@@ -255,6 +313,137 @@ export interface NotesLayer extends LayerMeta {
   notes: Note[];
 }
 
+// --- Routes & dive plans ----------------------------------------------------
+
+export type WaypointKind = 'poi' | 'free';
+
+interface WaypointBase {
+  id: UUID;
+  /**
+   * @deprecated Bottom time used to live on waypoints; now lives on `Stop`
+   * entries attached to the route. Retained on the type for backwards
+   * compatibility — ignored by dive math.
+   */
+  bottomTimeMin?: number;
+  /** Optional per-waypoint note (e.g. "look for the wreck's bow"). */
+  notes?: string;
+}
+
+export interface PoiRefWaypoint extends WaypointBase {
+  kind: 'poi';
+  poiRefId: UUID;
+  /** Optional override; otherwise uses the referenced POI.depth. */
+  depthOverrideM?: number;
+}
+
+export interface FreeWaypoint extends WaypointBase {
+  kind: 'free';
+  x: number;
+  y: number;
+  depthM?: number;
+  name?: string;
+}
+
+export type Waypoint = PoiRefWaypoint | FreeWaypoint;
+
+/**
+ * The shape used to add a new waypoint. We can't use `Omit<Waypoint, 'id'>`
+ * directly because `Omit` over a union doesn't preserve the discriminating
+ * fields — distributing manually keeps `kind` + `poiRefId`/`x`/`y` typed.
+ */
+export type WaypointInput = Omit<PoiRefWaypoint, 'id'> | Omit<FreeWaypoint, 'id'>;
+
+export type GasRulePolicy = 'thirds' | 'half' | 'all-usable';
+
+/** Fraction of oxygen in air. Used as the default for new gas plans. */
+export const FO2_AIR = 0.21;
+/** Maximum partial pressure of O2 used to compute MOD for working dives. */
+export const PPO2_MAX_WORKING = 1.4;
+/**
+ * Sensible bounds for the FO2 input. Below 21 %% you're into hypoxic mixes
+ * (technical / trimix territory) and above 40 %% you're into oxygen-rich
+ * Nitrox that needs O2-clean equipment. The app supports basic Nitrox only,
+ * so we clamp to the recreational range.
+ */
+export const FO2_MIN = 0.21;
+export const FO2_MAX = 0.40;
+
+export interface GasPlan {
+  /** Surface air consumption in litres / minute. */
+  sacLPerMin: number;
+  /** Cylinder volume in litres. */
+  cylinderL: number;
+  /** Starting cylinder pressure in bar. */
+  startBarPressure: number;
+  /** Reserve / minimum pressure in bar. */
+  reserveBarPressure: number;
+  rulePolicy: GasRulePolicy;
+  /** Lateral transit speed in metres / minute. */
+  transitSpeedMPerMin: number;
+  /**
+   * Fraction of oxygen in the breathing gas (0.21 = air, 0.32 = EAN32, etc.).
+   * Drives MOD calculations and equivalent-air-depth NDL lookups for basic
+   * enriched-air dives. Defaults to {@link FO2_AIR} on new profiles.
+   */
+  fo2: number;
+}
+
+/** What this route is for. Drives suggestions in the editor and shown to viewers. */
+export type RouteObjective =
+  | 'tour'
+  | 'training'
+  | 'recovery'
+  | 'fun'
+  | 'survey'
+  | 'photo'
+  | 'other';
+
+/** A duration-bearing event attached to a waypoint along the route. */
+export type StopKind =
+  | 'safety_stop'
+  | 'exercise'
+  | 'gas_check'
+  | 'observation'
+  | 'rest'
+  | 'other';
+
+export interface Stop {
+  id: UUID;
+  /** The waypoint this stop happens at. */
+  waypointId: UUID;
+  kind: StopKind;
+  /** Display name (e.g. "Mask removal drill", "Wreck bow tour"). */
+  name?: string;
+  /** Duration in minutes spent on this stop. */
+  durationMin: number;
+  notes?: string;
+}
+
+export interface Route {
+  id: UUID;
+  name: string;
+  /** What this route is for. Defaults to 'tour' on creation. */
+  objective: RouteObjective;
+  /** Hex colour for the polyline; default `#dc2626`. */
+  color: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  /** Ordered points the diver swims through; this is the path. */
+  waypoints: Waypoint[];
+  /** Stops/exercises with durations attached to specific waypoints. */
+  stops: Stop[];
+  /**
+   * Reference gas profile used for feasibility checks in the editor. The
+   * viewer-side "Plan this dive" panel can override these values per-diver
+   * without modifying the route.
+   */
+  gas: GasPlan;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- Site -------------------------------------------------------------------
 
 export interface SiteMeta {
@@ -264,10 +453,12 @@ export interface SiteMeta {
   northBearingDeg: number;
   /** Metres per world-coord unit (typically 1). */
   scaleMetersPerUnit: number;
-  /** Distance in metres represented by one grid square. Defaults to 20. */
+  /** Distance in metres represented by one grid square. Defaults to 3. */
   gridSpacingMeters?: number;
   /** Whether to show the legend overlay on the canvas (and in exports). */
   showLegend?: boolean;
+  /** Master toggle: when false, no routes render on canvas/print/export. Treated as true if absent. */
+  routesVisible?: boolean;
   /** Print/export region in world coords. If absent, no clipping is applied. */
   printArea?: { x: number; y: number; width: number; height: number };
   createdAt: string;
@@ -275,6 +466,7 @@ export interface SiteMeta {
 }
 
 export type LayerKey =
+  | 'references'
   | 'waterBody'
   | 'depth'
   | 'measurements'
@@ -284,6 +476,7 @@ export type LayerKey =
   | 'notes';
 
 export interface SiteLayers {
+  references: ReferenceLayer;
   waterBody: WaterBodyLayer;
   depth: DepthLayer;
   measurements: MeasurementsLayer;
@@ -300,15 +493,22 @@ export interface Site {
   layers: SiteLayers;
   /** Bottom-to-top render order. */
   layerOrder: LayerKey[];
+  /** Planned dive routes through the site. */
+  routes: Route[];
 }
 
 export const DEFAULT_LAYER_ORDER: LayerKey[] = [
+  // Reference imagery sits at the bottom of the stack so map data draws on top.
+  'references',
   'waterBody',
   'measurements',
   'depth',
   'illustrations',
-  'poi',
+  // Sub-POIs render BEFORE POIs so the parent POI marker always paints on top
+  // of its sub-annotations — keeps the primary marker readable even when
+  // sub-POIs cluster around it.
   'subPoi',
+  'poi',
   'notes',
 ];
 
@@ -323,19 +523,21 @@ export function emptySite(name = 'Untitled site'): Site {
       name,
       northBearingDeg: 0,
       scaleMetersPerUnit: 1,
-      gridSpacingMeters: 5,
+      gridSpacingMeters: 3,
       createdAt: now,
       updatedAt: now,
     },
     layers: {
+      references: { ...defaultLayerMeta(), items: [] },
       waterBody: { ...defaultLayerMeta(), type: 'open_water', shoreline: [] },
       depth: { ...defaultLayerMeta(), contours: [], labels: [] },
       measurements: { ...defaultLayerMeta(), soundings: [] },
       poi: { ...defaultLayerMeta(), pois: [], bearings: [] },
       subPoi: { ...defaultLayerMeta(), items: [] },
-      illustrations: { ...defaultLayerMeta(), items: [] },
+      illustrations: { ...defaultLayerMeta(), items: [], lines: [] },
       notes: { ...defaultLayerMeta(), notes: [] },
     },
     layerOrder: [...DEFAULT_LAYER_ORDER],
+    routes: [],
   };
 }
