@@ -1,16 +1,82 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSiteStore } from '../../state/useSiteStore';
+import { DEFAULT_BEARING_FONT_SIZE } from '../Map/layers/POILayerView';
 import type {
   Bearing,
   ContourLine,
   DepthLabel,
   DepthSounding,
   Illustration,
+  IllustrationLine,
+  IllustrationLineLabelPosition,
+  IllustrationLineStyle,
   Note,
   POI,
+  Point,
   ShorelinePath,
   SubPOI,
 } from '../../domain/types';
+import {
+  DEFAULT_DEPTH_LABEL_FONT_SIZE,
+  DEPTH_LABEL_MAX_FONT_SIZE,
+  DEPTH_LABEL_MIN_FONT_SIZE,
+  ILLUSTRATION_LINE_MAX_WIDTH,
+  ILLUSTRATION_LINE_MIN_WIDTH,
+} from '../../domain/types';
+
+type ContourDuplicateMode = 'inside' | 'outside';
+
+/**
+ * Build a duplicated set of points for a contour.
+ *
+ * For a closed loop:
+ *   - 'inside'  → scaled toward the centroid (smaller copy fits within).
+ *   - 'outside' → scaled away from the centroid (larger copy surrounds).
+ * For an open polyline:
+ *   - 'inside'  → shifted toward the bottom-right.
+ *   - 'outside' → shifted toward the top-left.
+ *
+ * The offset / scale magnitude is small enough that the duplicate is
+ * clearly distinguishable but not visually disruptive.
+ */
+function duplicateContourPoints(
+  points: Point[],
+  closed: boolean,
+  mode: ContourDuplicateMode,
+): Point[] {
+  if (points.length === 0) return [];
+  if (!closed) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const dxMag = Math.max(2, (maxX - minX) * 0.05);
+    const dyMag = Math.max(2, (maxY - minY) * 0.05);
+    const sign = mode === 'inside' ? 1 : -1; // bottom-right vs top-left
+    const dx = dxMag * sign;
+    const dy = dyMag * sign;
+    return points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  let sx = 0;
+  let sy = 0;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+  }
+  const cx = sx / points.length;
+  const cy = sy / points.length;
+  const scale = mode === 'inside' ? 0.85 : 1.15;
+  return points.map((p) => ({
+    x: cx + (p.x - cx) * scale,
+    y: cy + (p.y - cy) * scale,
+  }));
+}
 
 export default function Inspector() {
   const selection = useSiteStore((s) => s.editor.selection);
@@ -29,8 +95,13 @@ export default function Inspector() {
       depthLabel: new Set<string>(),
       subpoi: new Set<string>(),
       illustration: new Set<string>(),
+      illustrationLine: new Set<string>(),
       note: new Set<string>(),
       shoreline: new Set<string>(),
+      // Routes are managed from the dedicated Plans page; the universal
+      // delete here doesn't drop waypoints. Track the kind so the index
+      // type stays exhaustive.
+      waypoint: new Set<string>(),
     };
     for (const sel of selection) ids[sel.kind].add(sel.id);
     mutate((d) => {
@@ -61,6 +132,16 @@ export default function Inspector() {
       if (ids.illustration.size) {
         d.layers.illustrations.items = d.layers.illustrations.items.filter(
           (i) => !ids.illustration.has(i.id),
+        );
+        // The same selection kind covers both layers — also drop any matched
+        // reference imagery.
+        d.layers.references.items = d.layers.references.items.filter(
+          (i) => !ids.illustration.has(i.id),
+        );
+      }
+      if (ids.illustrationLine.size && d.layers.illustrations.lines) {
+        d.layers.illustrations.lines = d.layers.illustrations.lines.filter(
+          (l) => !ids.illustrationLine.has(l.id),
         );
       }
       if (ids.note.size) {
@@ -139,8 +220,17 @@ export default function Inspector() {
         break;
       }
       case 'illustration': {
-        const i = site.layers.illustrations.items.find((i) => i.id === sel.id);
-        if (i) body = <IllustrationEditor it={i} />;
+        const inIllustrations = site.layers.illustrations.items.find((i) => i.id === sel.id);
+        const inReferences = inIllustrations
+          ? null
+          : site.layers.references.items.find((i) => i.id === sel.id);
+        if (inIllustrations) body = <IllustrationEditor it={inIllustrations} source="illustrations" />;
+        else if (inReferences) body = <IllustrationEditor it={inReferences} source="references" />;
+        break;
+      }
+      case 'illustrationLine': {
+        const ln = (site.layers.illustrations.lines ?? []).find((l) => l.id === sel.id);
+        if (ln) body = <IllustrationLineEditor line={ln} />;
         break;
       }
       case 'note': {
@@ -190,16 +280,27 @@ function PoiEditor({ poi }: { poi: POI }) {
     });
   return (
     <div className="space-y-3 text-sm">
-      <Field label="Number">
+      <Field label="Label">
         <input
-          type="number"
+          type="text"
           className={inputClass}
           value={poi.number ?? ''}
-          onChange={(e) =>
+          placeholder="1, 2, A, B…"
+          onChange={(e) => {
+            const raw = e.target.value.trim();
             update((p) => {
-              p.number = e.target.value === '' ? undefined : Number(e.target.value);
-            })
-          }
+              if (raw === '') {
+                p.number = undefined;
+                return;
+              }
+              // If the user typed digits, store as a number so auto-numbering
+              // can still bump from this value; otherwise store the raw label.
+              const asNum = Number(raw);
+              p.number = /^-?\d+(?:\.\d+)?$/.test(raw) && Number.isFinite(asNum)
+                ? asNum
+                : raw;
+            });
+          }}
         />
       </Field>
       <Field label="Name">
@@ -272,11 +373,52 @@ function PoiEditor({ poi }: { poi: POI }) {
 
 function BearingEditor({ bearing }: { bearing: Bearing }) {
   const mutate = useSiteStore((s) => s.mutateSite);
+  const site = useSiteStore((s) => s.site);
+  const [anchor, setAnchor] = useState<'start' | 'end'>('start');
   const update = (fn: (b: Bearing) => void) =>
     mutate((d) => {
       const x = d.layers.poi.bearings.find((b) => b.id === bearing.id);
       if (x) fn(x);
     });
+
+  const fromPoi = site.layers.poi.pois.find((p) => p.id === bearing.fromId);
+  const toPoi = site.layers.poi.pois.find((p) => p.id === bearing.toId);
+  const canApply =
+    bearing.distanceM != null &&
+    bearing.distanceM > 0 &&
+    !!fromPoi?.position &&
+    !!toPoi?.position;
+
+  /**
+   * Move one POI so the bearing/distance match the values in the editor.
+   * The chosen anchor stays put; the other POI is repositioned along the
+   * bearing ray at the configured distance.
+   */
+  const applyPositions = () => {
+    mutate((d) => {
+      const b = d.layers.poi.bearings.find((x) => x.id === bearing.id);
+      if (!b || b.distanceM == null) return;
+      const from = d.layers.poi.pois.find((p) => p.id === b.fromId);
+      const to = d.layers.poi.pois.find((p) => p.id === b.toId);
+      if (!from || !to) return;
+      const θ = (b.bearingDeg * Math.PI) / 180;
+      const ux = Math.sin(θ);
+      const uy = -Math.cos(θ);
+      const dist = b.distanceM;
+      if (anchor === 'start') {
+        const base = from.position;
+        if (!base) return;
+        to.position = { x: base.x + dist * ux, y: base.y + dist * uy };
+      } else {
+        const base = to.position;
+        if (!base) return;
+        from.position = { x: base.x - dist * ux, y: base.y - dist * uy };
+      }
+      // Reverse becomes the canonical 180° complement again.
+      b.reverseBearingDeg = ((b.bearingDeg + 180) % 360 + 360) % 360;
+    });
+  };
+
   return (
     <div className="space-y-3 text-sm">
       <Field label="Bearing (°)">
@@ -315,6 +457,81 @@ function BearingEditor({ bearing }: { bearing: Bearing }) {
           onChange={(e) => update((b) => void (b.label = e.target.value || undefined))}
         />
       </Field>
+      <Field label={`Label size (${(bearing.labelFontSize ?? DEFAULT_BEARING_FONT_SIZE).toFixed(1)})`}>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={1}
+            max={10}
+            step={0.5}
+            value={bearing.labelFontSize ?? DEFAULT_BEARING_FONT_SIZE}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              update((b) => void (b.labelFontSize = v));
+            }}
+            className="flex-1"
+            aria-label="Bearing label size"
+          />
+          <button
+            type="button"
+            onClick={() => update((b) => void (b.labelFontSize = undefined))}
+            className="rounded border border-water-200 px-2 py-0.5 text-xs text-water-700 hover:bg-water-100"
+            title="Reset to default"
+          >
+            Reset
+          </button>
+        </div>
+      </Field>
+      <div className="rounded border border-water-200 bg-water-50/40 p-2">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-water-600">
+          Apply to positions
+        </div>
+        <p className="mb-2 text-[11px] text-water-700">
+          Move one POI so the bearing &amp; distance match the values above. The
+          anchor POI stays put; the other one is repositioned.
+        </p>
+        <Field label="Anchor">
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAnchor('start')}
+              className={`flex-1 rounded border px-2 py-1 text-xs font-medium ${
+                anchor === 'start'
+                  ? 'border-water-700 bg-water-700 text-white'
+                  : 'border-water-300 bg-white text-water-900 hover:bg-water-100'
+              }`}
+              title={fromPoi ? `Anchor ${fromPoi.name}` : 'Anchor start POI'}
+            >
+              Start{fromPoi ? ` (${fromPoi.name})` : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnchor('end')}
+              className={`flex-1 rounded border px-2 py-1 text-xs font-medium ${
+                anchor === 'end'
+                  ? 'border-water-700 bg-water-700 text-white'
+                  : 'border-water-300 bg-white text-water-900 hover:bg-water-100'
+              }`}
+              title={toPoi ? `Anchor ${toPoi.name}` : 'Anchor end POI'}
+            >
+              End{toPoi ? ` (${toPoi.name})` : ''}
+            </button>
+          </div>
+        </Field>
+        <button
+          type="button"
+          onClick={applyPositions}
+          disabled={!canApply}
+          className="mt-2 w-full rounded bg-water-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-water-800 disabled:cursor-not-allowed disabled:bg-water-300"
+          title={
+            !canApply
+              ? 'Set a distance and ensure both POIs have positions'
+              : `Move the ${anchor === 'start' ? 'end' : 'start'} POI`
+          }
+        >
+          Update positions
+        </button>
+      </div>
     </div>
   );
 }
@@ -395,6 +612,34 @@ function DepthLabelEditor({ label }: { label: DepthLabel }) {
           <option value="contour">Contour (water blue)</option>
         </select>
       </Field>
+      <Field
+        label={`Label size (${(label.fontSize ?? DEFAULT_DEPTH_LABEL_FONT_SIZE).toFixed(1)})`}
+      >
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={DEPTH_LABEL_MIN_FONT_SIZE}
+            max={DEPTH_LABEL_MAX_FONT_SIZE}
+            step={0.5}
+            value={label.fontSize ?? DEFAULT_DEPTH_LABEL_FONT_SIZE}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isFinite(v)) return;
+              update((l) => void (l.fontSize = v));
+            }}
+            className="flex-1 accent-water-600"
+            aria-label="Depth label size"
+          />
+          <button
+            type="button"
+            onClick={() => update((l) => void (l.fontSize = undefined))}
+            className="rounded border border-water-200 px-2 py-0.5 text-xs text-water-700 hover:bg-water-100"
+            title="Reset to default"
+          >
+            Reset
+          </button>
+        </div>
+      </Field>
       <p className="text-xs text-water-700">
         Position: ({Math.round(label.x * 10) / 10}, {Math.round(label.y * 10) / 10}) ·{' '}
         {label.origin ?? 'manual'}
@@ -405,13 +650,68 @@ function DepthLabelEditor({ label }: { label: DepthLabel }) {
 
 function ContourEditor({ contour }: { contour: ContourLine }) {
   const mutate = useSiteStore((s) => s.mutateSite);
+  const setSelection = useSiteStore((s) => s.setSelection);
   const update = (fn: (c: ContourLine) => void) =>
     mutate((d) => {
       const c = d.layers.depth.contours.find((c) => c.id === contour.id);
       if (c) fn(c);
     });
+  const duplicate = (mode: 'inside' | 'outside') => {
+    const newId = crypto.randomUUID();
+    mutate((d) => {
+      const src = d.layers.depth.contours.find((c) => c.id === contour.id);
+      if (!src) return;
+      const closed = !!src.closed;
+      // Depth shift: inside is deeper (+5 m), outside is shallower (-5 m,
+      // clamped at 0 so we never land on a negative depth).
+      const depthDelta = mode === 'inside' ? 5 : -5;
+      const newDepth = Math.max(0, src.depth + depthDelta);
+      const dup: ContourLine = {
+        ...src,
+        id: newId,
+        origin: 'manual',
+        depth: newDepth,
+        // Drop the override label so the new depth shows through; the user
+        // can re-set a custom label after if needed.
+        label: undefined,
+        points: duplicateContourPoints(src.points, closed, mode),
+      };
+      const idx = d.layers.depth.contours.findIndex((c) => c.id === contour.id);
+      if (idx >= 0) d.layers.depth.contours.splice(idx + 1, 0, dup);
+      else d.layers.depth.contours.push(dup);
+    });
+    setSelection({ kind: 'contour', id: newId });
+  };
   return (
     <div className="space-y-3 text-sm">
+      <Field label="Duplicate contour">
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => duplicate('inside')}
+            className="flex-1 rounded border border-water-300 bg-white px-2 py-1 text-xs font-medium text-water-900 hover:bg-water-100"
+            title={
+              contour.closed
+                ? 'Place a smaller copy inside the loop, +5 m depth'
+                : 'Place a copy toward the bottom-right, +5 m depth'
+            }
+          >
+            Inside (+5 m)
+          </button>
+          <button
+            type="button"
+            onClick={() => duplicate('outside')}
+            className="flex-1 rounded border border-water-300 bg-white px-2 py-1 text-xs font-medium text-water-900 hover:bg-water-100"
+            title={
+              contour.closed
+                ? 'Place a larger copy around the loop, −5 m depth'
+                : 'Place a copy toward the top-left, −5 m depth'
+            }
+          >
+            Outside (−5 m)
+          </button>
+        </div>
+      </Field>
       <Field label="Depth (m)">
         <input
           type="number"
@@ -547,15 +847,123 @@ function SubPoiEditor({ sub }: { sub: SubPOI }) {
   );
 }
 
-function IllustrationEditor({ it }: { it: Illustration }) {
+function IllustrationLineEditor({ line }: { line: IllustrationLine }) {
   const mutate = useSiteStore((s) => s.mutateSite);
-  const update = (fn: (i: Illustration) => void) =>
+  const update = (fn: (l: IllustrationLine) => void) =>
     mutate((d) => {
-      const x = d.layers.illustrations.items.find((i) => i.id === it.id);
-      if (x) fn(x);
+      const ln = d.layers.illustrations.lines?.find((l) => l.id === line.id);
+      if (ln) fn(ln);
     });
   return (
     <div className="space-y-3 text-sm">
+      <Field label="Label">
+        <input
+          className={inputClass}
+          value={line.label ?? ''}
+          placeholder="Optional text drawn along the line"
+          onChange={(e) =>
+            update((l) => void (l.label = e.target.value || undefined))
+          }
+        />
+      </Field>
+      <Field label="Label position">
+        <select
+          className={inputClass}
+          value={line.labelPosition ?? 'above'}
+          onChange={(e) =>
+            update(
+              (l) => void (l.labelPosition = e.target.value as IllustrationLineLabelPosition),
+            )
+          }
+        >
+          <option value="above">Above</option>
+          <option value="below">Below</option>
+          <option value="on">On the line</option>
+          <option value="hidden">Hidden</option>
+        </select>
+      </Field>
+      <Field label={`Width (${(typeof line.width === 'number' ? line.width : 0.5).toFixed(1)})`}>
+        <input
+          type="range"
+          min={ILLUSTRATION_LINE_MIN_WIDTH}
+          max={ILLUSTRATION_LINE_MAX_WIDTH}
+          step={0.1}
+          value={typeof line.width === 'number' ? line.width : 0.5}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (!Number.isFinite(v)) return;
+            update((l) => void (l.width = v));
+          }}
+          className="w-full accent-water-600"
+        />
+      </Field>
+      <Field label="Style">
+        <select
+          className={inputClass}
+          value={line.style ?? 'solid'}
+          onChange={(e) =>
+            update((l) => void (l.style = e.target.value as IllustrationLineStyle))
+          }
+        >
+          <option value="solid">Solid</option>
+          <option value="dashed">Dashed</option>
+        </select>
+      </Field>
+      <Field label="Colour">
+        <input
+          type="color"
+          className={inputClass}
+          value={line.color ?? '#374151'}
+          onChange={(e) => update((l) => void (l.color = e.target.value))}
+        />
+      </Field>
+      <p className="text-xs text-water-700">{line.points.length} pts · open polyline</p>
+    </div>
+  );
+}
+
+function IllustrationEditor({
+  it,
+  source = 'illustrations',
+}: {
+  it: Illustration;
+  source?: 'illustrations' | 'references';
+}) {
+  const mutate = useSiteStore((s) => s.mutateSite);
+  const update = (fn: (i: Illustration) => void) =>
+    mutate((d) => {
+      const x = d.layers[source].items.find((i) => i.id === it.id);
+      if (x) fn(x);
+    });
+  const moveToLayer = (target: 'illustrations' | 'references') => {
+    if (target === source) return;
+    mutate((d) => {
+      const idx = d.layers[source].items.findIndex((i) => i.id === it.id);
+      if (idx < 0) return;
+      const [item] = d.layers[source].items.splice(idx, 1);
+      if (item) d.layers[target].items.push(item);
+    });
+  };
+  return (
+    <div className="space-y-3 text-sm">
+      {/* Uploaded images can sit on either the Illustration layer (decoration
+          baked into the map) or the Reference imagery layer (guidance
+          backdrop, locked separately). Primitive shapes always live on the
+          Illustration layer. */}
+      {it.kind === 'image' && (
+        <Field label="Layer">
+          <select
+            className={inputClass}
+            value={source}
+            onChange={(e) =>
+              moveToLayer(e.target.value as 'illustrations' | 'references')
+            }
+          >
+            <option value="illustrations">Illustration (map decoration)</option>
+            <option value="references">Reference imagery (guidance backdrop)</option>
+          </select>
+        </Field>
+      )}
       <Field label="Caption">
         <input
           className={inputClass}

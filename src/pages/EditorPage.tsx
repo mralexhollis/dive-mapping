@@ -1,4 +1,4 @@
-import { useEffect, type SVGProps } from 'react';
+import { useEffect, useRef, type SVGProps } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import LayersPanel from '../components/Editor/LayersPanel';
 import Toolbar from '../components/Editor/Toolbar';
@@ -13,6 +13,11 @@ import {
   exportSvgDownload,
   loadSite,
 } from '../state/persistence';
+import {
+  defaultEmptyArea,
+  fitViewportToWorldRect,
+  resolveDefaultPrintArea,
+} from '../utils/fitViewport';
 
 export default function EditorPage() {
   useKeyboard();
@@ -35,6 +40,10 @@ export default function EditorPage() {
   const setToolbarCollapsed = useSiteStore((s) => s.setToolbarCollapsed);
   const setSidebarCollapsed = useSiteStore((s) => s.setSidebarCollapsed);
 
+  const setViewport = useSiteStore((s) => s.setViewport);
+  const canvasSize = useSiteStore((s) => s.editor.canvasSize);
+  const fittedRef = useRef<string | null>(null);
+
   // Sync URL siteId → store. If the URL points at a site we don't have in
   // memory, try to load from localStorage; otherwise bounce home.
   useEffect(() => {
@@ -45,9 +54,22 @@ export default function EditorPage() {
     else navigate('/', { replace: true });
   }, [siteId, site.id, replaceSite, navigate]);
 
+  // First-load fit: zoom to existing content, or to a sensible default
+  // dive-site-sized area for a brand-new empty site. Without this the editor
+  // opens at scale=1, which on a typical 800-px canvas shows ~800 m of empty
+  // space — far larger than a real dive covers.
+  useEffect(() => {
+    if (!site || canvasSize.width === 0 || canvasSize.height === 0) return;
+    if (fittedRef.current === site.id) return;
+    const area = resolveDefaultPrintArea(site) ?? defaultEmptyArea(site);
+    const v = fitViewportToWorldRect(area, canvasSize, site.meta.northBearingDeg ?? 0);
+    setViewport(() => v);
+    fittedRef.current = site.id;
+  }, [site, canvasSize, setViewport]);
+
   const findSvg = () => document.querySelector('svg[data-map-canvas]') as SVGSVGElement | null;
   const mutate = useSiteStore((s) => s.mutateSite);
-  const gridMeters = site.meta.gridSpacingMeters ?? 5;
+  const gridMeters = site.meta.gridSpacingMeters ?? 3;
   const showLegend = !!site.meta.showLegend;
   const showPrintArea = useSiteStore((s) => s.editor.showPrintArea);
   const setShowPrintArea = useSiteStore((s) => s.setShowPrintArea);
@@ -75,10 +97,11 @@ export default function EditorPage() {
           </button>
           <Link
             to="/"
-            className="hidden text-sm text-water-700 hover:text-water-900 sm:inline"
+            className="flex items-center justify-center rounded border border-water-200 px-2 py-1 text-water-700 hover:bg-water-100 hover:text-water-900"
             title="Back to sites"
+            aria-label="Back to sites"
           >
-            ←
+            <HomeIcon />
           </Link>
         </div>
         {/* Centre: site name */}
@@ -244,7 +267,7 @@ export default function EditorPage() {
       <div className="flex flex-1 min-h-0">
         {!toolbarCollapsed && <Toolbar />}
         <main className="relative flex-1 min-w-0">
-          <MapCanvas />
+          <MapCanvas mode="edit" />
         </main>
         {!sidebarCollapsed && (
           <div className="flex w-72 flex-col border-l border-water-200 bg-white">
@@ -261,11 +284,15 @@ export default function EditorPage() {
   );
 }
 
-function IconShell({ children, ...rest }: SVGProps<SVGSVGElement> & { children: React.ReactNode }) {
+function IconShell({
+  size = 16,
+  children,
+  ...rest
+}: SVGProps<SVGSVGElement> & { size?: number; children: React.ReactNode }) {
   return (
     <svg
-      width={16}
-      height={16}
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -277,6 +304,16 @@ function IconShell({ children, ...rest }: SVGProps<SVGSVGElement> & { children: 
     >
       {children}
     </svg>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <IconShell size={22}>
+      <path d="M 3 11 L 12 3 L 21 11" />
+      <path d="M 5 10 V 21 H 19 V 10" />
+      <path d="M 10 21 V 14 H 14 V 21" />
+    </IconShell>
   );
 }
 

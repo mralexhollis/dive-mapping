@@ -129,7 +129,8 @@ function hitsForLayer(
       }
       break;
     case 'illustrations':
-      for (const it of site.layers.illustrations.items) {
+    case 'references':
+      for (const it of site.layers[activeLayer].items) {
         const bbox: Rect = {
           minX: it.x,
           minY: it.y,
@@ -137,6 +138,18 @@ function hitsForLayer(
           maxY: it.y + it.height,
         };
         if (rectsOverlap(bbox, rect)) out.push({ kind: 'illustration', id: it.id });
+      }
+      if (activeLayer === 'illustrations') {
+        for (const ln of site.layers.illustrations.lines ?? []) {
+          for (let i = 0; i < ln.points.length - 1; i++) {
+            const a = ln.points[i]!;
+            const b = ln.points[i + 1]!;
+            if (segmentIntersectsRect(a, b, rect)) {
+              out.push({ kind: 'illustrationLine', id: ln.id });
+              break;
+            }
+          }
+        }
       }
       break;
     case 'notes':

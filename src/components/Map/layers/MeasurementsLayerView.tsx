@@ -67,7 +67,7 @@ function SoundingMarker({
     const world = clientToWorld(ev.clientX, ev.clientY, svg, viewport);
     let target = world;
     if (state.site.layers.measurements.snapToGridCenter) {
-      const g = state.site.meta.gridSpacingMeters ?? 5;
+      const g = state.site.meta.gridSpacingMeters ?? 3;
       target = {
         x: Math.floor(world.x / g) * g + g / 2,
         y: Math.floor(world.y / g) * g + g / 2,

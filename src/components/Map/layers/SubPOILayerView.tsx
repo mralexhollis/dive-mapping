@@ -37,12 +37,58 @@ export const SUBPOI_LABELS: Record<SubPOICategory, string> = {
   other: 'Other',
 };
 
+/**
+ * Target on-screen size of a sub-POI marker, in pixels. Deliberately smaller
+ * than {@link POI_TARGET_SCREEN_PX} (14) so sub-POIs always read as
+ * subordinate annotations. The world radius is scaled to keep the visual
+ * size roughly constant across zooms and clamped between [MIN, MAX] so
+ * markers stay legible at the extremes.
+ */
+const SUBPOI_TARGET_SCREEN_PX = 10;
+const SUBPOI_MIN_WORLD_RADIUS = 0.7;
+const SUBPOI_MAX_WORLD_RADIUS = 4.0;
+/** Fixed world radius the icon paths were originally authored at. */
+const SUBPOI_BASE_RADIUS = 2.4;
+
+interface SubPoiSize {
+  r: number;
+  /** Multiplier to apply to the inner icon paths so they grow/shrink with the circle. */
+  iconScale: number;
+  strokeWidth: number;
+  labelFontSize: number;
+  labelPad: number;
+}
+
+/**
+ * Compute zoom-reactive sub-POI sizing. Mirrors the POI helper but with a
+ * smaller target so sub-POIs always render visually smaller than the parent
+ * POI at every zoom level — the bounds and target are both proportionally
+ * smaller, so the relative size relationship is preserved end-to-end.
+ */
+function clampedSubPoiSize(viewportScale: number): SubPoiSize {
+  const target = SUBPOI_TARGET_SCREEN_PX / Math.max(viewportScale, 1e-6);
+  const r = Math.max(
+    SUBPOI_MIN_WORLD_RADIUS,
+    Math.min(SUBPOI_MAX_WORLD_RADIUS, target),
+  );
+  const iconScale = r / SUBPOI_BASE_RADIUS;
+  return {
+    r,
+    iconScale,
+    strokeWidth: r * 0.21, // matches the previous 0.5/2.4 ratio.
+    labelFontSize: r * 1.17, // matches the previous 2.8/2.4 ratio.
+    labelPad: r * 1.33, // matches the previous 3.2/2.4 ratio.
+  };
+}
+
 export function SubPOILayerView({ positions }: SubPOILayerViewProps) {
   const layer = useSiteStore((s) => s.site.layers.subPoi);
   const selection = useSiteStore((s) => s.editor.selection);
   const tool = useSiteStore((s) => s.editor.tool);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
   const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
+  const viewportScale = useSiteStore((s) => s.editor.viewport.scale);
+  const sized = clampedSubPoiSize(viewportScale);
   return (
     <g data-layer="subPoi">
       {layer.items.map((s) => {
@@ -62,6 +108,7 @@ export function SubPOILayerView({ positions }: SubPOILayerViewProps) {
             selected={isSelected}
             draggable={draggable}
             northDeg={northDeg}
+            sized={sized}
           />
         );
       })}
@@ -79,6 +126,7 @@ function SubPoiNode({
   selected,
   draggable,
   northDeg,
+  sized,
 }: {
   id: UUID;
   parentId: UUID;
@@ -89,6 +137,7 @@ function SubPoiNode({
   selected: boolean;
   draggable: boolean;
   northDeg: number;
+  sized: SubPoiSize;
 }) {
   const setSelection = useSiteStore((s) => s.setSelection);
   const mutate = useSiteStore((s) => s.mutateSite);
@@ -137,19 +186,26 @@ function SubPoiNode({
     >
       <g transform={`rotate(${northDeg})`}>
         <circle
-          r={2.4}
+          r={sized.r}
           fill={selected ? '#fcd34d' : style.fill}
           stroke={selected ? '#92400e' : style.stroke}
-          strokeWidth={0.5}
+          strokeWidth={sized.strokeWidth}
         />
-        <CategoryIcon
-          category={category}
-          color={selected ? '#92400e' : style.iconColor}
-        />
+        {/* Icon paths are authored at the canonical SUBPOI_BASE_RADIUS — scale
+            the whole group so they grow/shrink with the circle without
+            re-deriving every path. */}
+        <g transform={`scale(${sized.iconScale})`}>
+          <CategoryIcon
+            category={category}
+            color={selected ? '#92400e' : style.iconColor}
+          />
+        </g>
         <SubPoiLabel
           name={name}
           position={labelPosition ?? 'right'}
           selected={selected}
+          fontSize={sized.labelFontSize}
+          pad={sized.labelPad}
         />
       </g>
     </g>
@@ -160,14 +216,16 @@ function SubPoiLabel({
   name,
   position,
   selected,
+  fontSize,
+  pad,
 }: {
   name: string;
   position: POILabelPosition;
   selected: boolean;
+  fontSize: number;
+  pad: number;
 }) {
   if (position === 'hidden') return null;
-  // Marker has radius ~2.4; pad clears the edge.
-  const pad = 3.2;
   let x = 0;
   let y = 0;
   let textAnchor: 'start' | 'middle' | 'end' = 'start';
@@ -196,7 +254,7 @@ function SubPoiLabel({
     <text
       x={x}
       y={y}
-      fontSize={2.8}
+      fontSize={fontSize}
       textAnchor={textAnchor}
       dominantBaseline={dominantBaseline}
       className={selected ? 'fill-amber-900 font-semibold' : 'fill-amber-900'}

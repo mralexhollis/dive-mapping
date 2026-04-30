@@ -50,6 +50,7 @@ export function useKeyboard() {
         const depthLabelIds = new Set<string>();
         const subPoiIds = new Set<string>();
         const illustrationIds = new Set<string>();
+        const illustrationLineIds = new Set<string>();
         const noteIds = new Set<string>();
         const shorelineIds = new Set<string>();
         for (const sel of selection) {
@@ -61,6 +62,7 @@ export function useKeyboard() {
             case 'depthLabel': depthLabelIds.add(sel.id); break;
             case 'subpoi': subPoiIds.add(sel.id); break;
             case 'illustration': illustrationIds.add(sel.id); break;
+            case 'illustrationLine': illustrationLineIds.add(sel.id); break;
             case 'note': noteIds.add(sel.id); break;
             case 'shoreline': shorelineIds.add(sel.id); break;
           }
@@ -93,6 +95,14 @@ export function useKeyboard() {
           if (illustrationIds.size > 0) {
             d.layers.illustrations.items = d.layers.illustrations.items.filter(
               (i) => !illustrationIds.has(i.id),
+            );
+            d.layers.references.items = d.layers.references.items.filter(
+              (i) => !illustrationIds.has(i.id),
+            );
+          }
+          if (illustrationLineIds.size > 0 && d.layers.illustrations.lines) {
+            d.layers.illustrations.lines = d.layers.illustrations.lines.filter(
+              (l) => !illustrationLineIds.has(l.id),
             );
           }
           if (noteIds.size > 0) {

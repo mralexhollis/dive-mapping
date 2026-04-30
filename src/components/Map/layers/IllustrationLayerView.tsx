@@ -4,14 +4,22 @@ import type { Illustration, PrimitiveShape } from '../../../domain/types';
 import { vectorToBearing } from '../../../domain/geometry';
 import { clientToWorld } from '../../../utils/coords';
 
-export function IllustrationLayerView() {
-  const layer = useSiteStore((s) => s.site.layers.illustrations);
+/** Which Site layer the view should render and mutate. Both layers share the
+ * Illustration shape; the `source` prop selects between them. */
+export type IllustrationSource = 'illustrations' | 'references';
+
+export interface IllustrationLayerViewProps {
+  source?: IllustrationSource;
+}
+
+export function IllustrationLayerView({ source = 'illustrations' }: IllustrationLayerViewProps = {}) {
+  const layer = useSiteStore((s) => s.site.layers[source]);
   const selection = useSiteStore((s) => s.editor.selection);
   const setSelection = useSiteStore((s) => s.setSelection);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
 
   return (
-    <g data-layer="illustrations">
+    <g data-layer={source}>
       {layer.items.map((it) => {
         const isSelected = selection.some((s) => s.kind === 'illustration' && s.id === it.id);
         const cx = it.x + it.width / 2;
@@ -53,15 +61,15 @@ export function IllustrationLayerView() {
             )}
             {showHandles && (
               <>
-                <MoveHandle id={it.id} cx={cx} cy={cy} x={it.x} y={it.y} />
-                <ResizeHandle id={it.id} corner="tl" x={it.x} y={it.y} />
-                <ResizeHandle id={it.id} corner="tr" x={it.x + it.width} y={it.y} />
-                <ResizeHandle id={it.id} corner="bl" x={it.x} y={it.y + it.height} />
-                <ResizeHandle id={it.id} corner="br" x={it.x + it.width} y={it.y + it.height} />
+                <MoveHandle source={source} id={it.id} cx={cx} cy={cy} x={it.x} y={it.y} />
+                <ResizeHandle source={source} id={it.id} corner="tl" x={it.x} y={it.y} />
+                <ResizeHandle source={source} id={it.id} corner="tr" x={it.x + it.width} y={it.y} />
+                <ResizeHandle source={source} id={it.id} corner="bl" x={it.x} y={it.y + it.height} />
+                <ResizeHandle source={source} id={it.id} corner="br" x={it.x + it.width} y={it.y + it.height} />
               </>
             )}
             {showRotationHandle && (
-              <RotationHandle id={it.id} cx={cx} cy={cy} top={it.y - 5} />
+              <RotationHandle source={source} id={it.id} cx={cx} cy={cy} top={it.y - 5} />
             )}
           </g>
         );
@@ -71,12 +79,14 @@ export function IllustrationLayerView() {
 }
 
 function MoveHandle({
+  source,
   id,
   cx,
   cy,
   x,
   y,
 }: {
+  source: IllustrationSource;
   id: string;
   cx: number;
   cy: number;
@@ -110,7 +120,7 @@ function MoveHandle({
     const dx = world.x - dragRef.current.startWorld.x;
     const dy = world.y - dragRef.current.startWorld.y;
     mutate((d) => {
-      const it = d.layers.illustrations.items.find((i) => i.id === id);
+      const it = d.layers[source].items.find((i) => i.id === id);
       if (it) {
         it.x = dragRef.current.startX + dx;
         it.y = dragRef.current.startY + dy;
@@ -146,11 +156,13 @@ function MoveHandle({
 }
 
 function RotationHandle({
+  source,
   id,
   cx,
   cy,
   top,
 }: {
+  source: IllustrationSource;
   id: string;
   cx: number;
   cy: number;
@@ -175,7 +187,7 @@ function RotationHandle({
     // (0° = up, increases clockwise).
     const angle = vectorToBearing({ x: world.x - cx, y: world.y - cy });
     mutate((d) => {
-      const it = d.layers.illustrations.items.find((i) => i.id === id);
+      const it = d.layers[source].items.find((i) => i.id === id);
       if (it) it.rotationDeg = Math.round(angle);
     });
   };
@@ -214,7 +226,7 @@ function rotateAround(p: { x: number; y: number }, angleDeg: number) {
   return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
 }
 
-function ResizeHandle({ id, corner, x, y }: { id: string; corner: Corner; x: number; y: number }) {
+function ResizeHandle({ source, id, corner, x, y }: { source: IllustrationSource; id: string; corner: Corner; x: number; y: number }) {
   const mutate = useSiteStore((s) => s.mutateSite);
   const dragRef = useRef<{
     active: boolean;
@@ -226,7 +238,7 @@ function ResizeHandle({ id, corner, x, y }: { id: string; corner: Corner; x: num
   const onPointerDown = (ev: React.PointerEvent<SVGCircleElement>) => {
     if (ev.button !== 0) return;
     ev.stopPropagation();
-    const it = useSiteStore.getState().site.layers.illustrations.items.find((i) => i.id === id);
+    const it = useSiteStore.getState().site.layers[source].items.find((i) => i.id === id);
     if (!it) return;
     const startRot = it.rotationDeg ?? 0;
     const halfW = it.width / 2;
@@ -273,7 +285,7 @@ function ResizeHandle({ id, corner, x, y }: { id: string; corner: Corner; x: num
     const newX = mid.x - w / 2;
     const newY = mid.y - h / 2;
     mutate((d) => {
-      const it = d.layers.illustrations.items.find((i) => i.id === id);
+      const it = d.layers[source].items.find((i) => i.id === id);
       if (!it) return;
       it.x = newX;
       it.y = newY;

@@ -7,6 +7,7 @@ import {
   SUBPOI_STYLES,
 } from '../Map/layers/SubPOILayerView';
 import ContourGeneratorDialog from './ContourGeneratorDialog';
+import BearingSolverDialog from './BearingSolverDialog';
 
 interface ToolDef {
   id: string;
@@ -17,7 +18,11 @@ interface ToolDef {
   /** Render a bigger button + icon — useful for richer iconography (e.g. sub-POI category badges). */
   largeIcon?: boolean;
   /** Special action — runs an arbitrary callback instead of selecting a tool. */
-  action?: 'open-contour-generator' | 'import-illustration';
+  action?:
+    | 'open-contour-generator'
+    | 'import-illustration'
+    | 'import-reference'
+    | 'open-bearing-solver';
 }
 
 interface LayerSection {
@@ -103,7 +108,7 @@ const SECTIONS: LayerSection[] = [
         hint: 'click a vertex handle on the selected contour to remove it',
         icon: <RemovePointIcon />,
       },
-      { id: '__generate__', label: 'Generate contours…', action: 'open-contour-generator' },
+      { id: '__generate__', label: 'Generate contours…', icon: <GenerateContoursIcon />, action: 'open-contour-generator' },
     ],
   },
   {
@@ -116,6 +121,13 @@ const SECTIONS: LayerSection[] = [
         label: 'Add bearing',
         hint: 'click POI A then POI B',
         icon: <AddBearingIcon />,
+      },
+      {
+        id: '__solve_bearings__',
+        label: 'Bearing solver',
+        hint: 'enter / edit POI bearings, then triangulate the POI positions',
+        icon: <BearingSolverIcon />,
+        action: 'open-bearing-solver',
       },
     ],
   },
@@ -145,6 +157,19 @@ const SECTIONS: LayerSection[] = [
     })(),
   },
   {
+    key: 'references',
+    title: 'Reference imagery',
+    tools: [
+      {
+        id: '__import_ref__',
+        label: 'Import reference',
+        hint: 'upload a PNG / JPEG / SVG (e.g. a screenshot from a mapping product) as a guidance backdrop',
+        icon: <ImportImageIcon />,
+        action: 'import-reference',
+      },
+    ],
+  },
+  {
     key: 'illustrations',
     title: 'Illustrations',
     tools: [
@@ -152,6 +177,24 @@ const SECTIONS: LayerSection[] = [
       { id: 'add-square', label: 'Square', hint: 'click on the canvas to drop a square', icon: <SquareIcon /> },
       { id: 'add-circle', label: 'Circle', hint: 'click on the canvas to drop an ellipse', icon: <CircleIcon /> },
       { id: 'add-triangle', label: 'Triangle', hint: 'click on the canvas to drop a triangle', icon: <TriangleIcon /> },
+      {
+        id: 'draw-illustration-line',
+        label: 'Line / path',
+        hint: 'click points along a path; double-click to finish',
+        icon: <DrawIllustrationLineIcon />,
+      },
+      {
+        id: 'add-point',
+        label: 'Add point',
+        hint: 'click on the canvas near the selected line to insert a new vertex',
+        icon: <AddPointIcon />,
+      },
+      {
+        id: 'remove-point',
+        label: 'Remove point',
+        hint: 'click a vertex handle on the selected line to remove it',
+        icon: <RemovePointIcon />,
+      },
       { id: '__import__', label: 'Import image', hint: 'upload a PNG / JPEG / SVG and place it on the canvas', icon: <ImportImageIcon />, action: 'import-illustration' },
     ],
   },
@@ -175,7 +218,9 @@ export default function Toolbar() {
   const setTool = useSiteStore((s) => s.setTool);
   const setLayerAndTool = useSiteStore((s) => s.setLayerAndTool);
   const [contourDialogOpen, setContourDialogOpen] = useState(false);
+  const [bearingSolverOpen, setBearingSolverOpen] = useState(false);
   const [importBumper, setImportBumper] = useState(0);
+  const [importTarget, setImportTarget] = useState<'illustrations' | 'references'>('illustrations');
 
   const onClickTool = (sectionKey: LayerKey, t: ToolDef) => {
     if (t.action === 'open-contour-generator') {
@@ -185,7 +230,19 @@ export default function Toolbar() {
     }
     if (t.action === 'import-illustration') {
       setLayerAndTool(sectionKey, 'select');
+      setImportTarget('illustrations');
       setImportBumper((b) => b + 1);
+      return;
+    }
+    if (t.action === 'import-reference') {
+      setLayerAndTool(sectionKey, 'select');
+      setImportTarget('references');
+      setImportBumper((b) => b + 1);
+      return;
+    }
+    if (t.action === 'open-bearing-solver') {
+      setLayerAndTool(sectionKey, 'select');
+      setBearingSolverOpen(true);
       return;
     }
     setLayerAndTool(sectionKey, t.id);
@@ -196,19 +253,36 @@ export default function Toolbar() {
       <div className="border-b border-water-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-water-700">
         Tools
       </div>
-      <div className="border-b border-water-200 p-2">
+      <div className="flex border-b border-water-200 p-2 gap-2">
         <button
           type="button"
           onClick={() => setTool('select')}
           title="Click an item to select it. Drag on the canvas to marquee-select multiple."
+          aria-label="Select tool"
+          aria-pressed={tool === 'select'}
           className={[
-            'w-full rounded px-2 py-1.5 text-left text-sm',
+            'flex h-9 flex-1 items-center justify-center rounded',
             tool === 'select'
               ? 'bg-water-600 text-white'
               : 'border border-water-300 bg-white text-water-900 hover:bg-water-100',
           ].join(' ')}
         >
-          Select <span className="text-[10px] opacity-70">(drag to select)</span>
+          <PointerIcon />
+        </button>
+        <button
+          type="button"
+          onClick={() => setTool('pan')}
+          title="Drag the map to pan around. Doesn't select or modify anything."
+          aria-label="Pan tool"
+          aria-pressed={tool === 'pan'}
+          className={[
+            'flex h-9 flex-1 items-center justify-center rounded',
+            tool === 'pan'
+              ? 'bg-water-600 text-white'
+              : 'border border-water-300 bg-white text-water-900 hover:bg-water-100',
+          ].join(' ')}
+        >
+          <HandIcon />
         </button>
       </div>
       <ul className="flex-1 overflow-y-auto px-2 py-2">
@@ -296,8 +370,9 @@ export default function Toolbar() {
           );
         })}
       </ul>
-      <ImageImporter bumper={importBumper} />
+      <ImageImporter bumper={importBumper} target={importTarget} />
       {contourDialogOpen && <ContourGeneratorDialog onClose={() => setContourDialogOpen(false)} />}
+      {bearingSolverOpen && <BearingSolverDialog onClose={() => setBearingSolverOpen(false)} />}
     </div>
   );
 }
@@ -620,6 +695,32 @@ function ImportImageIcon(props: IconProps) {
   );
 }
 
+function PointerIcon(props: IconProps) {
+  // Classic arrow cursor pointer.
+  return (
+    <IconShell {...props}>
+      <path
+        d="M 5 3 L 5 19 L 9 15 L 12 21 L 14 20 L 11 14 L 17 14 Z"
+        fill="currentColor"
+        fillOpacity={0.85}
+      />
+    </IconShell>
+  );
+}
+
+function HandIcon(props: IconProps) {
+  // Open grab hand — fingers up, thumb left.
+  return (
+    <IconShell {...props}>
+      <path
+        d="M 8 11 L 8 6 a 1.4 1.4 0 1 1 2.8 0 V 11 M 10.8 6 V 4 a 1.4 1.4 0 1 1 2.8 0 V 11 M 13.6 4.5 V 3 a 1.4 1.4 0 1 1 2.8 0 V 11 M 16.4 5 V 6 a 1.4 1.4 0 1 1 2.8 0 V 13.5 a 7 7 0 0 1 -7 7.5 a 5.5 5.5 0 0 1 -5 -3 L 4.5 13 a 1.5 1.5 0 0 1 2.5 -1.6 L 8 12.5"
+        fill="currentColor"
+        fillOpacity={0.18}
+      />
+    </IconShell>
+  );
+}
+
 function NoteIcon(props: IconProps) {
   // Sticky note with a folded corner + a few text lines.
   return (
@@ -633,6 +734,71 @@ function NoteIcon(props: IconProps) {
       <line x1={8} y1={12} x2={17} y2={12} />
       <line x1={8} y1={15} x2={17} y2={15} />
       <line x1={8} y1={18} x2={13} y2={18} />
+    </IconShell>
+  );
+}
+
+function DrawIllustrationLineIcon(props: IconProps) {
+  // A flowing curve with two endpoint dots — suggests a free-form path /
+  // line illustration, distinct from the dashed contour-draw icon.
+  return (
+    <IconShell {...props}>
+      <path d="M 3 18 C 7 7 13 7 14 14 C 14.6 18 18 19 21 14" strokeWidth={2} />
+      <circle cx={3} cy={18} r={1.2} fill="currentColor" stroke="none" />
+      <circle cx={21} cy={14} r={1.2} fill="currentColor" stroke="none" />
+    </IconShell>
+  );
+}
+
+function BearingSolverIcon(props: IconProps) {
+  // A magic wand above a bearing arrow with a small angle arc — captures
+  // "wand triangulates angles into positions". Distinct from the contour
+  // wand (which sits above a wavy dotted line).
+  return (
+    <IconShell {...props}>
+      {/* Wand shaft, pointing up-right */}
+      <line x1={5} y1={13} x2={14} y2={4} strokeWidth={2} />
+      {/* Handle band near the base */}
+      <line x1={5.5} y1={13.5} x2={7.5} y2={11.5} strokeWidth={2.6} />
+      {/* 4-point star tip */}
+      <path
+        d="M 14 1.5 L 15.2 3.4 L 17 4 L 15.2 4.6 L 14 6.5 L 12.8 4.6 L 11 4 L 12.8 3.4 Z"
+        fill="currentColor"
+        fillOpacity={0.35}
+      />
+      {/* Bearing baseline + angled bearing line + small angle arc */}
+      <line x1={3} y1={20} x2={21} y2={20} strokeWidth={1.4} />
+      <line x1={3} y1={20} x2={17} y2={14.5} strokeWidth={1.6} />
+      <path
+        d="M 8 20 A 5 5 0 0 0 7.4 17"
+        strokeWidth={1.2}
+      />
+    </IconShell>
+  );
+}
+
+function GenerateContoursIcon(props: IconProps) {
+  // A magic wand above a wavy dotted line: the wand "generates" the
+  // contour, represented by the dotted wave below it.
+  return (
+    <IconShell {...props}>
+      {/* Wand shaft, pointing up-right */}
+      <line x1={5} y1={13} x2={14} y2={4} strokeWidth={2} />
+      {/* Handle band near the base of the shaft */}
+      <line x1={5.5} y1={13.5} x2={7.5} y2={11.5} strokeWidth={2.6} />
+      {/* 4-pointed star tip */}
+      <path
+        d="M 14 1.5 L 15.2 3.4 L 17 4 L 15.2 4.6 L 14 6.5 L 12.8 4.6 L 11 4 L 12.8 3.4 Z"
+        fill="currentColor"
+        fillOpacity={0.35}
+      />
+      {/* Wavy dotted line below — the generated contour */}
+      <path
+        d="M 2.5 19 Q 6 16.5 9.5 19 T 16.5 19 T 22 19"
+        strokeDasharray="0.6 2.4"
+        strokeLinecap="round"
+        strokeWidth={1.8}
+      />
     </IconShell>
   );
 }
@@ -719,7 +885,13 @@ function TapeMeasureIcon(props: IconProps) {
 
 // -----------------------------------------------------------------------------
 
-function ImageImporter({ bumper }: { bumper: number }) {
+function ImageImporter({
+  bumper,
+  target,
+}: {
+  bumper: number;
+  target: 'illustrations' | 'references';
+}) {
   const mutate = useSiteStore((s) => s.mutateSite);
   const setSelection = useSiteStore((s) => s.setSelection);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -736,7 +908,7 @@ function ImageImporter({ bumper }: { bumper: number }) {
       img.onload = () => {
         const id = crypto.randomUUID();
         mutate((d) => {
-          d.layers.illustrations.items.push({
+          d.layers[target].items.push({
             id,
             src,
             mimeType: file.type as 'image/png' | 'image/jpeg' | 'image/svg+xml' | 'image/webp',
@@ -745,7 +917,7 @@ function ImageImporter({ bumper }: { bumper: number }) {
             width: img.width,
             height: img.height,
             placement: 'under',
-            opacity: 0.8,
+            opacity: target === 'references' ? 1 : 0.8,
             caption: file.name,
           });
         });

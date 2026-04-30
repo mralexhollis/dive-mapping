@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useSiteStore } from '../../../state/useSiteStore';
 import type { ContourLine, Point } from '../../../domain/types';
-import { centroid, pointAlongPolyline } from '../../../domain/geometry';
+import { centroid, nearestSegment, pointAlongPolyline } from '../../../domain/geometry';
 import { clientToWorld } from '../../../utils/coords';
 
 export function DepthLayerView() {
@@ -12,6 +12,7 @@ export function DepthLayerView() {
   const labelNorthDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
   const pendingPolyline = useSiteStore((s) => s.editor.pendingPolyline);
   const setSelection = useSiteStore((s) => s.setSelection);
+  const mutate = useSiteStore((s) => s.mutateSite);
   const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
 
   return (
@@ -31,6 +32,22 @@ export function DepthLayerView() {
                 onPointerDown={(ev) => {
                   if (ev.button !== 0) return;
                   ev.stopPropagation();
+                  // Ctrl/Cmd-click inserts a vertex at the closest point on
+                  // the contour. Skip when the layer is locked / read-only.
+                  if ((ev.ctrlKey || ev.metaKey) && !layer.locked && !readOnly) {
+                    const svg = ev.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const viewport = useSiteStore.getState().editor.viewport;
+                    const world = clientToWorld(ev.clientX, ev.clientY, svg, viewport);
+                    const ns = nearestSegment(c.points, !!c.closed, world);
+                    if (!ns) return;
+                    mutate((draft) => {
+                      const found = draft.layers.depth.contours.find((x) => x.id === c.id);
+                      if (found) found.points.splice(ns.insertIdx, 0, ns.point);
+                    });
+                    setSelection({ kind: 'contour', id: c.id });
+                    return;
+                  }
                   setSelection({ kind: 'contour', id: c.id });
                 }}
                 style={{ cursor: 'pointer' }}
@@ -46,7 +63,7 @@ export function DepthLayerView() {
                     ? 'stroke-water-500/70'
                     : 'stroke-water-700/80'
                 }
-                strokeDasharray={c.origin === 'derived' ? '1.5 1' : undefined}
+                strokeDasharray={c.origin === 'derived' ? '1.5 1' : '2 1.5'}
                 pointerEvents="none"
               />
               {!c.labelHidden && c.points.length > 0 && (() => {
@@ -86,12 +103,16 @@ export function DepthLayerView() {
                   );
                 });
               })()}
-              {isSelected && !layer.locked && !readOnly && (
-                <ContourEditHandles contour={c} tool={tool} />
-              )}
             </g>
           );
         })}
+        {/* Handles render after every contour's hit-stroke so a later contour
+            never swallows a click intended for the selected contour's handles. */}
+        {!layer.locked &&
+          !readOnly &&
+          layer.contours
+            .filter((c) => selection.some((s) => s.kind === 'contour' && s.id === c.id))
+            .map((c) => <ContourEditHandles key={c.id} contour={c} tool={tool} />)}
       </g>
       <g data-sublayer="depth-labels">
         {(layer.labels ?? []).map((lbl) => {
@@ -109,6 +130,7 @@ export function DepthLayerView() {
               selected={isSelected}
               draggable={tool === 'select' && !layer.locked && !readOnly}
               northDeg={northDeg}
+              fontSize={lbl.fontSize}
             />
           );
         })}
@@ -140,6 +162,7 @@ function DepthLabelMarker({
   selected,
   draggable,
   northDeg,
+  fontSize,
 }: {
   id: string;
   x: number;
@@ -149,6 +172,7 @@ function DepthLabelMarker({
   selected: boolean;
   draggable: boolean;
   northDeg: number;
+  fontSize?: number;
 }) {
   const setSelection = useSiteStore((s) => s.setSelection);
   const mutate = useSiteStore((s) => s.mutateSite);
@@ -195,7 +219,7 @@ function DepthLabelMarker({
       <text
         x={x}
         y={y}
-        fontSize={4}
+        fontSize={fontSize ?? 4}
         textAnchor="middle"
         className={
           selected

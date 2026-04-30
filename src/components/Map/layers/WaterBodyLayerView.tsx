@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useSiteStore } from '../../../state/useSiteStore';
 import type { Point, ShorelinePath, WaterBodyShape } from '../../../domain/types';
 import { smoothPath } from '../../../utils/smoothing';
-import { centroid } from '../../../domain/geometry';
+import { centroid, nearestSegment } from '../../../domain/geometry';
 import { clientToWorld } from '../../../utils/coords';
 
 const SHAPE_STYLES: Record<
@@ -33,6 +33,7 @@ export function WaterBodyLayerView() {
   const layer = useSiteStore((s) => s.site.layers.waterBody);
   const selection = useSiteStore((s) => s.editor.selection);
   const setSelection = useSiteStore((s) => s.setSelection);
+  const mutate = useSiteStore((s) => s.mutateSite);
   const tool = useSiteStore((s) => s.editor.tool);
   const readOnly = useSiteStore((s) => s.editor.readOnly);
   const pendingPolyline = useSiteStore((s) => s.editor.pendingPolyline);
@@ -56,6 +57,22 @@ export function WaterBodyLayerView() {
               onPointerDown={(ev) => {
                 if (ev.button !== 0) return;
                 ev.stopPropagation();
+                // Ctrl/Cmd-click on the path inserts a new vertex at the
+                // closest point on the path. Skip if the layer is locked.
+                if ((ev.ctrlKey || ev.metaKey) && !layer.locked && !readOnly) {
+                  const svg = ev.currentTarget.ownerSVGElement;
+                  if (!svg) return;
+                  const viewport = useSiteStore.getState().editor.viewport;
+                  const world = clientToWorld(ev.clientX, ev.clientY, svg, viewport);
+                  const ns = nearestSegment(path.points, path.closed, world);
+                  if (!ns) return;
+                  mutate((d) => {
+                    const sh = d.layers.waterBody.shoreline.find((s) => s.id === path.id);
+                    if (sh) sh.points.splice(ns.insertIdx, 0, ns.point);
+                  });
+                  setSelection({ kind: 'shoreline', id: path.id });
+                  return;
+                }
                 setSelection({ kind: 'shoreline', id: path.id });
               }}
               style={{ cursor: 'pointer' }}
@@ -68,12 +85,18 @@ export function WaterBodyLayerView() {
               strokeDasharray={style.dash}
               pointerEvents="none"
             />
-            {isSelected && !layer.locked && !readOnly && (
-              <EditHandles path={path} tool={tool} />
-            )}
           </g>
         );
       })}
+      {/* Selection handles render in a separate pass AFTER every item's
+          hit-stroke, so they always win the click priority — otherwise a
+          later-rendered shoreline's transparent hit-stroke can swallow the
+          click intended for the handle of an earlier-selected shoreline. */}
+      {!layer.locked &&
+        !readOnly &&
+        layer.shoreline
+          .filter((p) => selection.some((s) => s.kind === 'shoreline' && s.id === p.id))
+          .map((p) => <EditHandles key={p.id} path={p} tool={tool} />)}
       {pendingPolyline?.layer === 'waterBody' && pendingPolyline.points.length > 0 && (
         <PendingPreview points={pendingPolyline.points} shape={pendingPolyline.shape ?? 'shoreline'} />
       )}

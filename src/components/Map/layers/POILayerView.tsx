@@ -20,6 +20,10 @@ export function POILayerView({ positions }: POILayerViewProps) {
   const isLayerActive = activeLayer === 'poi';
   const isSubPoiActive = activeLayer === 'subPoi';
 
+  // When a POI is selected, the bearings touching it are highlighted and
+  // every other bearing's label is hidden so the focused subset reads cleanly.
+  const selectedPoiId = selection.find((s) => s.kind === 'poi')?.id ?? null;
+
   return (
     <g data-layer="poi">
       <g data-sublayer="bearings">
@@ -28,6 +32,10 @@ export function POILayerView({ positions }: POILayerViewProps) {
           const c = positions.get(b.toId);
           if (!a || !c) return null;
           const isSelected = selection.some((s) => s.kind === 'bearing' && s.id === b.id);
+          const connectedToSelectedPoi =
+            selectedPoiId != null && (b.fromId === selectedPoiId || b.toId === selectedPoiId);
+          const hideLabel =
+            selectedPoiId != null && !connectedToSelectedPoi;
           return (
             <BearingEdge
               key={b.id}
@@ -38,7 +46,10 @@ export function POILayerView({ positions }: POILayerViewProps) {
               reverseDeg={b.reverseBearingDeg}
               dashed={b.style === 'dashed'}
               label={b.label}
+              labelFontSize={b.labelFontSize}
               selected={isSelected}
+              connectedHighlight={connectedToSelectedPoi}
+              hideLabel={hideLabel}
             />
           );
         })}
@@ -92,7 +103,7 @@ interface PoiNodeProps {
   pending: boolean;
   draggable: boolean;
   tool: string | null;
-  number?: number;
+  number?: number | string;
   labelPosition?: POILabelPosition;
   northDeg: number;
 }
@@ -114,7 +125,9 @@ function PoiNode({
   const setPendingFrom = useSiteStore((s) => s.setPendingBearingFrom);
   const setTool = useSiteStore((s) => s.setTool);
   const mutate = useSiteStore((s) => s.mutateSite);
+  const viewportScale = useSiteStore((s) => s.editor.viewport.scale);
   const dragRef = useRef({ active: false, moved: false });
+  const sized = clampedPoiSize(viewportScale);
 
   const onPointerDown = (ev: React.PointerEvent<SVGGElement>) => {
     if (ev.button !== 0) return;
@@ -200,9 +213,9 @@ function PoiNode({
       data-poi={id}
     >
       <circle
-        r={3.6}
+        r={sized.r}
         className={fillClass}
-        strokeWidth={selected || pending ? 0.7 : 0.5}
+        strokeWidth={selected || pending ? sized.strokeWidth * 1.4 : sized.strokeWidth}
       />
       {/* Counter-rotate everything else by +northDeg so the number + label
           read horizontally regardless of the screen-bearing rotation. */}
@@ -211,7 +224,7 @@ function PoiNode({
           <text
             x={0}
             y={0}
-            fontSize={3.6}
+            fontSize={sized.numberFontSize}
             textAnchor="middle"
             dominantBaseline="central"
             className="fill-white"
@@ -228,6 +241,7 @@ function PoiNode({
             depth={depth}
             position={labelPosition ?? 'right'}
             selected={selected}
+            markerRadius={sized.r}
           />
         )}
       </g>
@@ -240,15 +254,19 @@ function PoiLabel({
   depth,
   position,
   selected,
+  markerRadius,
 }: {
   name: string;
   depth?: number;
   position: POILabelPosition;
   selected: boolean;
+  markerRadius: number;
 }) {
   const text = `${name}${depth != null ? ` (${depth}m)` : ''}`;
-  // Marker has radius 3.6; pad so the label clears the marker edge.
-  const pad = 4.5;
+  // Pad so the label clears the marker edge regardless of zoom-clamped size.
+  const pad = markerRadius + 1;
+  // Match the label's font size to the marker so the pair stays balanced.
+  const labelFontSize = Math.max(2, markerRadius * 1.1);
   let x = 0;
   let y = 0;
   let textAnchor: 'start' | 'middle' | 'end' = 'start';
@@ -284,7 +302,7 @@ function PoiLabel({
       textAnchor={textAnchor}
       dominantBaseline={dominantBaseline}
       className={selected ? 'fill-amber-900' : 'fill-water-900'}
-      fontSize={4}
+      fontSize={labelFontSize}
       fontFamily="ui-sans-serif, system-ui"
       pointerEvents="none"
     >
@@ -318,7 +336,40 @@ interface BearingEdgeProps {
   reverseDeg?: number;
   dashed?: boolean;
   label?: string;
+  labelFontSize?: number;
   selected: boolean;
+  /** Bearing touches a currently-selected POI — render emphasised. */
+  connectedHighlight?: boolean;
+  /** Suppress the label (used when another POI's connection set is focused). */
+  hideLabel?: boolean;
+}
+
+/** Default label font size in world units when none is set on the bearing. */
+export const DEFAULT_BEARING_FONT_SIZE = 3;
+
+/**
+ * Target on-screen size of a POI marker, in pixels. The world-space radius is
+ * scaled to keep the visual size roughly constant across zoom levels and
+ * clamped between [MIN, MAX] so markers never become invisible when zoomed
+ * out or fill the canvas when zoomed in.
+ */
+const POI_TARGET_SCREEN_PX = 14;
+const POI_MIN_WORLD_RADIUS = 1.0;
+const POI_MAX_WORLD_RADIUS = 6.0;
+
+/** Compute zoom-reactive POI sizing from the current viewport scale. */
+function clampedPoiSize(viewportScale: number): {
+  r: number;
+  strokeWidth: number;
+  numberFontSize: number;
+} {
+  const target = POI_TARGET_SCREEN_PX / Math.max(viewportScale, 1e-6);
+  const r = Math.max(POI_MIN_WORLD_RADIUS, Math.min(POI_MAX_WORLD_RADIUS, target));
+  return {
+    r,
+    strokeWidth: r * 0.16,
+    numberFontSize: r,
+  };
 }
 
 function useDistanceForBearing(id: UUID): number | undefined {
@@ -331,7 +382,19 @@ function formatMetersShort(m: number): string {
   return `${Math.round(m * 10) / 10}m`;
 }
 
-function BearingEdge({ id, from, to, bearingDeg, reverseDeg, dashed, label, selected }: BearingEdgeProps) {
+function BearingEdge({
+  id,
+  from,
+  to,
+  bearingDeg,
+  reverseDeg,
+  dashed,
+  label,
+  labelFontSize,
+  selected,
+  connectedHighlight,
+  hideLabel,
+}: BearingEdgeProps) {
   const setSelection = useSiteStore((s) => s.setSelection);
   const northDeg = useSiteStore((s) => s.site.meta.northBearingDeg) ?? 0;
   const reverse = reverseDeg ?? (bearingDeg + 180) % 360;
@@ -370,6 +433,19 @@ function BearingEdge({ id, from, to, bearingDeg, reverseDeg, dashed, label, sele
   if (distanceM != null) labelParts.push(`~${formatMetersShort(distanceM)}`);
   const labelText = labelParts.join(' · ');
 
+  // Stroke style: an explicit selection takes priority; otherwise a
+  // connected-to-selected-POI emphasis bumps the stroke to amber.
+  const strokeClass = selected
+    ? 'stroke-amber-600'
+    : connectedHighlight
+      ? 'stroke-amber-500'
+      : 'stroke-water-900';
+  const strokeWidth = selected ? 0.8 : connectedHighlight ? 0.7 : 0.5;
+  const labelClass = selected
+    ? 'fill-amber-900'
+    : connectedHighlight
+      ? 'fill-amber-900'
+      : 'fill-water-900';
   return (
     <g onPointerDown={onPointerDown} style={{ cursor: 'pointer' }}>
       <line
@@ -385,21 +461,23 @@ function BearingEdge({ id, from, to, bearingDeg, reverseDeg, dashed, label, sele
         y1={from.y}
         x2={to.x}
         y2={to.y}
-        className={selected ? 'stroke-amber-600' : 'stroke-water-900'}
-        strokeWidth={selected ? 0.8 : 0.5}
+        className={strokeClass}
+        strokeWidth={strokeWidth}
         strokeDasharray={dashed ? '2 2' : undefined}
       />
-      <text
-        x={labelX}
-        y={labelY}
-        fontSize={3}
-        textAnchor="middle"
-        transform={`rotate(${angle} ${labelX} ${labelY})`}
-        className={selected ? 'fill-amber-900' : 'fill-water-900'}
-        fontFamily="ui-sans-serif, system-ui"
-      >
-        {labelText}
-      </text>
+      {!hideLabel && (
+        <text
+          x={labelX}
+          y={labelY}
+          fontSize={labelFontSize ?? DEFAULT_BEARING_FONT_SIZE}
+          textAnchor="middle"
+          transform={`rotate(${angle} ${labelX} ${labelY})`}
+          className={labelClass}
+          fontFamily="ui-sans-serif, system-ui"
+        >
+          {labelText}
+        </text>
+      )}
     </g>
   );
 }
