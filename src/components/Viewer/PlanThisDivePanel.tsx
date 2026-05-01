@@ -280,12 +280,12 @@ function DepthTimeProfileForViewer({
   gas: GasPlan;
 }) {
   const overridden: Route = useMemo(() => ({ ...route, gas }), [route, gas]);
-  return <DepthTimeProfile route={overridden} summary={summary} width={380} height={220} />;
+  return <DepthTimeProfile route={overridden} summary={summary} />;
 }
 
 function warningClass(kind: string): string {
   switch (kind) {
-    case 'ndl':
+    case 'ceiling-violation':
     case 'rapid-ascent':
     case 'reserve':
     case 'mod-exceeded':

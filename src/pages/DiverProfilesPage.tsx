@@ -211,6 +211,11 @@ function ProfileCard({
           step={0.1}
           min={0.1}
           onChange={(v) => onUpdateGas({ cylinderL: v })}
+          info={
+            'Total breathing-gas volume in litres at 1 bar. ' +
+            'For twin / manifolded sets, enter the combined volume — e.g. twin 12 L → 24. ' +
+            'This planner models a single gas only; staged or deco mixes are not supported.'
+          }
         />
         <NumberField
           label="Start (bar)"
@@ -234,7 +239,17 @@ function ProfileCard({
           onChange={(v) => onUpdateGas({ transitSpeedMPerMin: v })}
         />
         <label className="flex flex-col text-xs text-water-700">
-          <span className="mb-1">Rule</span>
+          <span className="mb-1 flex items-center gap-1">
+            Rule
+            <InfoIcon
+              text={
+                'Determines the turn pressure on top of the reserve. The reserve is a hard floor that is never planned into the dive; the rule decides how much of the remaining usable gas (start − reserve) you commit to the outward leg before turning around.\n\n' +
+                'Thirds — turn after 1/3 of usable, return with 1/3 of usable plus the reserve. Standard cave / wreck contingency.\n' +
+                'Half — turn at half of usable. Common for shore traverses with a long swim back.\n' +
+                'All usable — no contingency on top of the reserve; turn when you hit the reserve. Use when the reserve already includes your contingency.'
+              }
+            />
+          </span>
           <select
             value={profile.gas.rulePolicy}
             onChange={(e) => onUpdateGas({ rulePolicy: e.target.value as GasRulePolicy })}
@@ -242,7 +257,7 @@ function ProfileCard({
           >
             <option value="thirds">Thirds</option>
             <option value="half">Half</option>
-            <option value="all-usable">All usable</option>
+            <option value="all-usable">All usable (= reserve)</option>
           </select>
         </label>
         <NumberField
@@ -285,6 +300,7 @@ function NumberField({
   min,
   max,
   onChange,
+  info,
 }: {
   label: string;
   value: number;
@@ -292,10 +308,15 @@ function NumberField({
   min?: number;
   max?: number;
   onChange: (v: number) => void;
+  /** Optional explanatory text shown via a hover (i) icon next to the label. */
+  info?: string;
 }) {
   return (
     <label className="flex flex-col text-xs text-water-700">
-      <span className="mb-1">{label}</span>
+      <span className="mb-1 flex items-center gap-1">
+        {label}
+        {info && <InfoIcon text={info} />}
+      </span>
       <input
         type="number"
         value={value}
@@ -312,6 +333,26 @@ function NumberField({
         className="rounded border border-water-200 px-2 py-1 text-sm text-water-900"
       />
     </label>
+  );
+}
+
+/**
+ * Small inline (i) glyph that surfaces explanatory text via the browser's
+ * native title tooltip. Native is good enough here — accessible to screen
+ * readers, works on keyboard focus, long-press on touch — and avoids dragging
+ * in a styled-tooltip dependency for a single use site.
+ */
+function InfoIcon({ text }: { text: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={text}
+      title={text}
+      tabIndex={0}
+      className="inline-flex h-3.5 w-3.5 cursor-help select-none items-center justify-center rounded-full border border-water-300 text-[9px] font-semibold leading-none text-water-600 hover:border-water-500 hover:text-water-900 focus:outline-none focus:ring-1 focus:ring-water-400"
+    >
+      i
+    </span>
   );
 }
 

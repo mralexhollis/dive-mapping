@@ -1,3 +1,8 @@
+import {
+  ceilingDepthM,
+  initialTissueLoadings,
+  stepTissueLoadings,
+} from './buhlmann';
 import { distance } from './geometry';
 import {
   FO2_AIR,
@@ -13,27 +18,11 @@ import {
   type Waypoint,
 } from './types';
 
-/**
- * No-decompression limits in minutes, by depth in metres. Values approximate the
- * PADI Recreational Dive Planner air table for first dives. Depths shallower
- * than the smallest entry are treated as effectively unlimited.
- */
-export const NDL_TABLE_M: ReadonlyArray<{ depthM: number; ndlMin: number }> = [
-  { depthM: 12, ndlMin: 147 },
-  { depthM: 15, ndlMin: 72 },
-  { depthM: 18, ndlMin: 56 },
-  { depthM: 21, ndlMin: 41 },
-  { depthM: 24, ndlMin: 28 },
-  { depthM: 27, ndlMin: 24 },
-  { depthM: 30, ndlMin: 18 },
-  { depthM: 33, ndlMin: 14 },
-  { depthM: 36, ndlMin: 12 },
-  { depthM: 39, ndlMin: 10 },
-  { depthM: 42, ndlMin: 8 },
-];
-
 export const MAX_ASCENT_RATE_M_PER_MIN = 9;
 export const MAX_DESCENT_RATE_M_PER_MIN = 18;
+
+/** Step size for Bühlmann integration along the planned depth profile. */
+const CEILING_SAMPLE_DT_MIN = 0.1;
 
 export function defaultGasPlan(): GasPlan {
   return {
@@ -171,46 +160,8 @@ export function turnPressure(
   }
 }
 
-/**
- * Inverse of {@link ndlForDepth}: the depth ceiling at a given elapsed
- * bottom-time. Returns the depth at-or-below which staying any longer would
- * exceed NDL — divers must be SHALLOWER than this value. For times shorter
- * than the deepest tabled NDL (8 min at 42 m), there is no constraint within
- * the table and `Infinity` is returned. For times beyond the longest tabled
- * NDL (147 min at 12 m), the ceiling clamps at the shallowest tabled depth.
- *
- * The result is a staircase that drops monotonically as time accumulates,
- * making it easy to overlay on the depth profile as a visible "no-go" line.
- */
-export function ndlCeilingDepthM(elapsedMin: number): number {
-  if (elapsedMin <= 0) return Infinity;
-  // Walk shallowest → deepest. The first entry whose NDL is at-or-below the
-  // elapsed time marks the ceiling: the diver must stay shallower than this
-  // depth. Equality counts (NDL of 8 min at 42 m means at exactly 8 min you
-  // can no longer be at 42 m).
-  for (let i = 0; i < NDL_TABLE_M.length; i++) {
-    if (NDL_TABLE_M[i]!.ndlMin <= elapsedMin) return NDL_TABLE_M[i]!.depthM;
-  }
-  // Elapsed time is shorter than every tabled NDL — no ceiling within the table.
-  return Infinity;
-}
-
-/**
- * Floor-look-up of NDL minutes for a given depth. Depths shallower than the
- * smallest tabled value return Infinity (no NDL pressure). Depths between
- * entries take the next-deeper entry's value (more conservative).
- */
-export function ndlForDepth(depthM: number): number {
-  if (depthM < NDL_TABLE_M[0]!.depthM) return Infinity;
-  for (let i = NDL_TABLE_M.length - 1; i >= 0; i--) {
-    const entry = NDL_TABLE_M[i]!;
-    if (depthM >= entry.depthM) return entry.ndlMin;
-  }
-  return NDL_TABLE_M[NDL_TABLE_M.length - 1]!.ndlMin;
-}
-
 export type DivePlanWarningKind =
-  | 'ndl'
+  | 'ceiling-violation'
   | 'reserve'
   | 'unresolved-poi'
   | 'no-depth'
@@ -239,16 +190,30 @@ export interface DivePlanSegmentMetrics {
   airBar: number;
   cumulativeAirBar: number;
   remainingAirBar: number;
-  /**
-   * NDL minutes for this segment — looked up against the segment's
-   * equivalent air depth so Nitrox mixes earn longer bottom times.
-   */
-  ndlMin: number;
-  ndlExceeded: boolean;
   rapidAscent: boolean;
   rapidDescent: boolean;
   /** True when the segment's max depth exceeds the gas mix's MOD. */
   modExceeded: boolean;
+}
+
+/**
+ * One sample of the planned dive's depth profile and the Bühlmann deco
+ * ceiling at that moment. `ceilingM` is 0 until tissue loadings make the
+ * ceiling rise from the surface; `violation` is true wherever the planned
+ * depth is shallower than the ceiling.
+ */
+export interface CeilingSample {
+  tMin: number;
+  depthM: number;
+  ceilingM: number;
+  violation: boolean;
+}
+
+export interface CeilingViolationRange {
+  startMin: number;
+  endMin: number;
+  /** Largest difference (ceiling − depth) seen during the breach, in metres. */
+  maxBreachM: number;
 }
 
 export interface DivePlanSummary {
@@ -263,6 +228,13 @@ export interface DivePlanSummary {
   modM: number;
   warnings: DivePlanWarning[];
   segments: DivePlanSegmentMetrics[];
+  /**
+   * Bühlmann ZHL-16C ceiling sampled along the planned profile (every
+   * {@link CEILING_SAMPLE_DT_MIN} minutes). Empty when there are no segments.
+   */
+  ceilingSamples: CeilingSample[];
+  /** Consolidated time ranges where the planned depth was above the ceiling. */
+  ceilingViolations: CeilingViolationRange[];
 }
 
 /**
@@ -334,23 +306,10 @@ export function divePlanSummary(
     const remainingAirBar = gas.startBarPressure - cumulativeAirBar;
 
     const verticalRateMPerMin = timeMin > 0 ? (toDepthM - fromDepthM) / timeMin : 0;
-    // Look up NDL against the segment's equivalent air depth so a Nitrox
-    // mix earns the longer bottom time the table promises.
-    const eadM = equivalentAirDepthM(avgDepthM, fo2);
-    const ndlMin = ndlForDepth(eadM);
-    // Use stops-at-dest as the "bottom time" charged against NDL for this segment.
-    const ndlExceeded = stopsAtDest > ndlMin;
     const rapidAscent = -verticalRateMPerMin > MAX_ASCENT_RATE_M_PER_MIN;
     const rapidDescent = verticalRateMPerMin > MAX_DESCENT_RATE_M_PER_MIN;
     const modExceeded = Number.isFinite(modM) && maxDepthM > modM;
 
-    if (ndlExceeded) {
-      warnings.push({
-        kind: 'ndl',
-        segmentIdx: i,
-        message: `Segment ${i + 1}: stops total ${stopsAtDest} min at ${avgDepthM.toFixed(1)} m exceed NDL ${ndlMin} min.`,
-      });
-    }
     if (rapidAscent) {
       warnings.push({
         kind: 'rapid-ascent',
@@ -390,8 +349,6 @@ export function divePlanSummary(
       airBar,
       cumulativeAirBar,
       remainingAirBar,
-      ndlMin,
-      ndlExceeded,
       rapidAscent,
       rapidDescent,
       modExceeded,
@@ -410,6 +367,18 @@ export function divePlanSummary(
     });
   }
 
+  // Bühlmann ZHL-16C ceiling simulation along the planned profile. Runs
+  // after segment metrics are known so the time-depth function is fully
+  // determined; pushes any violation ranges as warnings.
+  const { samples: ceilingSamples, violations: ceilingViolations } =
+    simulateCeilingProfile(segments, stops, fo2);
+  for (const v of ceilingViolations) {
+    warnings.push({
+      kind: 'ceiling-violation',
+      message: `Deco ceiling breached from ${v.startMin.toFixed(1)} to ${v.endMin.toFixed(1)} min — ascent reached up to ${v.maxBreachM.toFixed(1)} m above the ceiling.`,
+    });
+  }
+
   return {
     totalDistanceM,
     totalTimeMin,
@@ -420,5 +389,93 @@ export function divePlanSummary(
     modM,
     warnings,
     segments,
+    ceilingSamples,
+    ceilingViolations,
   };
+}
+
+/**
+ * Simulate the Bühlmann ZHL-16C deco ceiling along the planned profile.
+ *
+ * Builds a piecewise-linear depth(t) function from the segments + stops,
+ * then samples it every {@link CEILING_SAMPLE_DT_MIN} minutes. At each
+ * sample, applies a Haldane integration step to the 16 tissue compartments
+ * and computes the ceiling depth.
+ *
+ * Returns regularly-spaced samples for the chart, plus consolidated time
+ * ranges where the planned depth rose above the ceiling (= violations).
+ */
+function simulateCeilingProfile(
+  segments: DivePlanSegmentMetrics[],
+  stops: Stop[],
+  fo2: number,
+): { samples: CeilingSample[]; violations: CeilingViolationRange[] } {
+  if (segments.length === 0) return { samples: [], violations: [] };
+
+  // Build (tMin, depthM) breakpoints: start, then per segment a transit
+  // endpoint and (if there's a stop at the destination waypoint) a stop
+  // endpoint.
+  const breakpoints: Array<{ t: number; depth: number }> = [];
+  breakpoints.push({ t: 0, depth: segments[0]!.fromDepthM });
+  let t = 0;
+  for (const seg of segments) {
+    const stopMin = stopsAtWaypointMin(stops, seg.toId);
+    const transitMin = Math.max(0, seg.timeMin - stopMin);
+    const transitT = t + transitMin;
+    breakpoints.push({ t: transitT, depth: seg.toDepthM });
+    t = transitT;
+    if (stopMin > 0) {
+      t += stopMin;
+      breakpoints.push({ t, depth: seg.toDepthM });
+    }
+  }
+  const totalT = t;
+  if (totalT <= 0) return { samples: [], violations: [] };
+
+  /** Linear-interp depth at any time within the breakpoints. */
+  const depthAt = (queryT: number): number => {
+    if (queryT <= breakpoints[0]!.t) return breakpoints[0]!.depth;
+    for (let i = 1; i < breakpoints.length; i++) {
+      const a = breakpoints[i - 1]!;
+      const b = breakpoints[i]!;
+      if (queryT <= b.t) {
+        const span = b.t - a.t;
+        if (span <= 0) return b.depth;
+        const ratio = (queryT - a.t) / span;
+        return a.depth + (b.depth - a.depth) * ratio;
+      }
+    }
+    return breakpoints[breakpoints.length - 1]!.depth;
+  };
+
+  // Step the simulation. Use the depth at the START of each step as the
+  // constant-depth approximation for that step (good enough at 0.1 min).
+  let loadings = initialTissueLoadings();
+  const samples: CeilingSample[] = [];
+  const violations: CeilingViolationRange[] = [];
+  let activeViolation: CeilingViolationRange | null = null;
+  const stepCount = Math.max(1, Math.ceil(totalT / CEILING_SAMPLE_DT_MIN));
+  for (let i = 0; i <= stepCount; i++) {
+    const sampleT = Math.min(totalT, i * CEILING_SAMPLE_DT_MIN);
+    const depth = depthAt(sampleT);
+    const ceil = ceilingDepthM(loadings);
+    const violation = depth < ceil - 1e-6;
+    samples.push({ tMin: sampleT, depthM: depth, ceilingM: ceil, violation });
+    if (violation) {
+      const breach = ceil - depth;
+      if (activeViolation == null) {
+        activeViolation = { startMin: sampleT, endMin: sampleT, maxBreachM: breach };
+      } else {
+        activeViolation.endMin = sampleT;
+        if (breach > activeViolation.maxBreachM) activeViolation.maxBreachM = breach;
+      }
+    } else if (activeViolation != null) {
+      violations.push(activeViolation);
+      activeViolation = null;
+    }
+    if (i < stepCount) loadings = stepTissueLoadings(loadings, depth, fo2, CEILING_SAMPLE_DT_MIN);
+  }
+  if (activeViolation != null) violations.push(activeViolation);
+
+  return { samples, violations };
 }
