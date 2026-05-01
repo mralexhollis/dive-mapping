@@ -92,13 +92,31 @@ export function loadDiverProfiles(): DiverProfile[] {
     // ignore — fall through to seed
   }
 
-  const seed: DiverProfile = {
-    id: cryptoRandomId(),
-    name: 'Default',
-    gas: defaultGasPlan(),
-  };
-  saveDiverProfiles([seed]);
-  return [seed];
+  const seed = seedDefaultProfiles();
+  saveDiverProfiles(seed);
+  return seed;
+}
+
+/**
+ * First-run profile seed — three common single-cylinder sizes (10/12/15 L)
+ * filled to 210 bar, each in both Air and EAN32 flavours. Twin / manifolded
+ * sets are handled by entering the combined volume in a custom profile (see
+ * the (i) tooltip on the cylinder field in the profiles UI).
+ */
+function seedDefaultProfiles(): DiverProfile[] {
+  const base = defaultGasPlan();
+  const sizes = [10, 12, 15] as const;
+  const mixes: Array<{ fo2: number; label: string }> = [
+    { fo2: FO2_AIR, label: 'Air' },
+    { fo2: 0.32, label: 'EAN32' },
+  ];
+  return sizes.flatMap((cylinderL) =>
+    mixes.map((mix) => ({
+      id: cryptoRandomId(),
+      name: `${cylinderL} L @ 210 bar · ${mix.label}`,
+      gas: { ...base, cylinderL, startBarPressure: 210, fo2: mix.fo2 },
+    })),
+  );
 }
 
 export function saveDiverProfiles(profiles: DiverProfile[]): void {

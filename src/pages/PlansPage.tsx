@@ -8,6 +8,7 @@ import AddWaypointToolbar from '../components/Plans/AddWaypointToolbar';
 import Itinerary from '../components/Plans/Itinerary';
 import MapCanvas from '../components/Map/MapCanvas';
 import ResizableSplit from '../components/ResizableSplit';
+import { useIsMobile } from '../hooks/useResponsivePanels';
 
 const LS_LEFT_WIDTH = 'dive-mapping:plans-left-width';
 const LS_ITINERARY_HEIGHT = 'dive-mapping:plans-itinerary-height';
@@ -93,6 +94,7 @@ export default function PlansPage() {
     setTool('route-add-waypoint');
   };
 
+  const isMobile = useIsMobile();
   const [detailPanelCollapsed, setDetailPanelCollapsed] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() =>
     loadPersistedSize(LS_LEFT_WIDTH, DEFAULT_LEFT_WIDTH),
@@ -147,7 +149,38 @@ export default function PlansPage() {
         </button>
       </header>
       <div className="flex flex-1 min-h-0">
-        {detailPanelCollapsed ? (
+        {isMobile ? (
+          // Mobile: the row split can't fit (~780px needed) and dragging a
+          // resizer with a finger is fiddly. Stack the three panes at fixed
+          // viewport-height fractions; each pane scrolls inside its own area.
+          // The "Details ▸" toggle still works to hide the bottom pane and
+          // give the map + itinerary more room. `min-w-0` is critical — without
+          // it the column refuses to shrink below the natural width of any
+          // intrinsically-sized child (e.g. the depth/time chart's SVG),
+          // overflowing the viewport.
+          <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+            <div className="h-[35vh] min-h-0 shrink-0">
+              <Itinerary
+                route={route}
+                summary={summary}
+                onArmAddWaypoint={armAddWaypoint}
+              />
+            </div>
+            <div
+              className={`relative min-h-0 shrink-0 bg-water-100 ${
+                detailPanelCollapsed ? 'flex-1' : 'h-[35vh]'
+              }`}
+            >
+              <MapCanvas mode="plan" />
+              <AddWaypointToolbar />
+            </div>
+            {!detailPanelCollapsed && (
+              <div className="flex-1 min-h-0 border-t border-water-200 bg-white">
+                <PlanDetailPanel route={route} summary={summary} />
+              </div>
+            )}
+          </div>
+        ) : detailPanelCollapsed ? (
           // No right column: the left panel takes the full viewport.
           <ResizableSplit
             direction="column"

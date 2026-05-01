@@ -226,7 +226,7 @@ function gasesMatch(a: GasPlan, b: GasPlan): boolean {
 
 function warningClass(kind: string): string {
   switch (kind) {
-    case 'ndl':
+    case 'ceiling-violation':
     case 'rapid-ascent':
     case 'reserve':
     case 'mod-exceeded':

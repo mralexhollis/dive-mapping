@@ -4,7 +4,7 @@ import MapCanvas from '../components/Map/MapCanvas';
 import ViewerSidebar from '../components/Viewer/ViewerSidebar';
 import Itinerary from '../components/Plans/Itinerary';
 import ResizableSplit from '../components/ResizableSplit';
-import { useResponsivePanels } from '../hooks/useResponsivePanels';
+import { useIsMobile, useResponsivePanels } from '../hooks/useResponsivePanels';
 import { useSiteStore } from '../state/useSiteStore';
 import { loadSite } from '../state/persistence';
 import { divePlanSummary } from '../domain/divePlan';
@@ -66,6 +66,7 @@ export default function ViewerPage() {
   const sidebarCollapsed = useSiteStore((s) => s.editor.sidebarCollapsed);
   const setSidebarCollapsed = useSiteStore((s) => s.setSidebarCollapsed);
   const mutate = useSiteStore((s) => s.mutateSite);
+  const isMobile = useIsMobile();
   const showLegend = !!site.meta.showLegend;
   const fittedRef = useRef<string | null>(null);
 
@@ -176,7 +177,39 @@ export default function ViewerPage() {
         </div>
       </header>
       <div className="flex flex-1 min-h-0">
-        {sidebarCollapsed ? (
+        {isMobile ? (
+          // Mobile: stack itinerary, map, and sidebar at fixed viewport-height
+          // fractions; each pane scrolls independently inside its own area.
+          // The "Details ▸" toggle still hides the sidebar to give the map +
+          // itinerary more room. `min-w-0` is critical — without it the column
+          // refuses to shrink below the natural width of any intrinsically-
+          // sized child (e.g. the depth/time chart's SVG), overflowing the
+          // viewport.
+          <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+            <div className="h-[35vh] min-h-0 shrink-0">
+              <ItineraryPane
+                route={route}
+                summary={summary}
+                onArmAddWaypoint={noopArmAddWaypoint}
+              />
+            </div>
+            <div
+              className={`relative min-h-0 shrink-0 bg-water-100 ${
+                sidebarCollapsed ? 'flex-1' : 'h-[35vh]'
+              }`}
+            >
+              <MapCanvas mode="view" />
+            </div>
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-h-0 border-t border-water-200 bg-white">
+                <ViewerSidebar
+                  selectedRouteId={selectedRouteId}
+                  setSelectedRouteId={setSelectedRouteId}
+                />
+              </div>
+            )}
+          </div>
+        ) : sidebarCollapsed ? (
           // No right column: itinerary + map fill the whole viewport.
           <ResizableSplit
             direction="column"

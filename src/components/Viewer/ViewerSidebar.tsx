@@ -328,7 +328,7 @@ function GraphBody({ route, summary, gas }: GraphBodyProps) {
   const overridden: Route = { ...route, gas };
   return (
     <div className="bg-white p-3">
-      <DepthTimeProfile route={overridden} summary={summary} width={380} height={220} />
+      <DepthTimeProfile route={overridden} summary={summary} />
     </div>
   );
 }
@@ -415,7 +415,7 @@ function Stat({
 
 function warningClass(kind: string): string {
   switch (kind) {
-    case 'ndl':
+    case 'ceiling-violation':
     case 'rapid-ascent':
     case 'reserve':
     case 'mod-exceeded':

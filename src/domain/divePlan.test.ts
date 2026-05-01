@@ -5,7 +5,6 @@ import {
   equivalentAirDepthM,
   gasConsumedBar,
   maxOperatingDepthM,
-  ndlForDepth,
   segmentDistanceM,
   turnPressure,
   MAX_ASCENT_RATE_M_PER_MIN,
@@ -91,35 +90,44 @@ describe('equivalentAirDepthM', () => {
   });
 });
 
-describe('ndlForDepth', () => {
-  it('handles edges and rounds up to the next-deeper bracket', () => {
-    expect(ndlForDepth(11)).toBe(Infinity);
-    expect(ndlForDepth(12)).toBe(147);
-    // 19m falls between 18 (56) and 21 (41); look-up should pick 56 since
-    // floor-by-tabled-depth picks the deepest entry whose depthM ≤ input.
-    expect(ndlForDepth(19)).toBe(56);
-    // 50m → table minimum (deepest entry).
-    expect(ndlForDepth(50)).toBe(8);
-  });
-});
-
 describe('divePlanSummary', () => {
-  it('totals distance, finds turn segment, and flags NDL warnings from stops', () => {
-    const wp1 = { id: 'a', kind: 'free' as const, x: 0, y: 0, depthM: 18 };
-    const wp2 = { id: 'b', kind: 'free' as const, x: 30, y: 0, depthM: 18 };
-    const wp3 = { id: 'c', kind: 'free' as const, x: 60, y: 0, depthM: 18 };
+  it('totals distance, finds turn segment, and flags ceiling violations on ascent', () => {
+    // 0 m → 40 m → 0 m, with a 40-min stop at WP 2. 40 min at 40 m on air
+    // saturates fast tissues well past their surface M-values, so the
+    // straight ascent back to WP 3 (0 m) breaches the Bühlmann ceiling.
+    const wp1 = { id: 'a', kind: 'free' as const, x: 0, y: 0, depthM: 0 };
+    const wp2 = { id: 'b', kind: 'free' as const, x: 30, y: 0, depthM: 40 };
+    const wp3 = { id: 'c', kind: 'free' as const, x: 60, y: 0, depthM: 0 };
     const route = makeRoute({
       waypoints: [wp1, wp2, wp3],
-      // 70-minute stop at WP 2 — exceeds NDL of 56 at 18m.
-      stops: [stopAt('b', 70, 'rest'), stopAt('c', 5)],
+      stops: [stopAt('b', 40, 'rest')],
     });
     const site = withSite([route]);
 
     const s = divePlanSummary(route, site);
     expect(s.segments.length).toBe(2);
     expect(closeTo(s.totalDistanceM, 60, 1e-6)).toBe(true);
-    expect(s.warnings.some((w) => w.kind === 'ndl')).toBe(true);
+    expect(s.warnings.some((w) => w.kind === 'ceiling-violation')).toBe(true);
+    expect(s.ceilingViolations.length).toBeGreaterThan(0);
+    // The ceiling samples should rise above the surface during the deep stop.
+    expect(s.ceilingSamples.some((p) => p.ceilingM > 0)).toBe(true);
     expect(typeof s.turnAtSegmentIdx === 'number' || s.turnAtSegmentIdx === null).toBe(true);
+  });
+
+  it('does not flag ceiling violations for a short shallow dive that stays within ZHL-16C limits', () => {
+    // 10 m for 20 min, then a clean ascent. Raw ZHL-16C never produces a
+    // ceiling at 10 m, so there should be no violations.
+    const wp1 = { id: 'a', kind: 'free' as const, x: 0, y: 0, depthM: 0 };
+    const wp2 = { id: 'b', kind: 'free' as const, x: 30, y: 0, depthM: 10 };
+    const wp3 = { id: 'c', kind: 'free' as const, x: 60, y: 0, depthM: 0 };
+    const route = makeRoute({
+      waypoints: [wp1, wp2, wp3],
+      stops: [stopAt('b', 20, 'rest')],
+    });
+    const s = divePlanSummary(route, withSite([route]));
+    expect(s.warnings.some((w) => w.kind === 'ceiling-violation')).toBe(false);
+    expect(s.ceilingViolations).toEqual([]);
+    expect(s.ceilingSamples.every((p) => p.ceilingM === 0)).toBe(true);
   });
 
   it('reports rapid ascent/descent, but not at the limit', () => {

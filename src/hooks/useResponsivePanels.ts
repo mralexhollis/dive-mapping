@@ -1,7 +1,31 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSiteStore } from '../state/useSiteStore';
 
-const MOBILE_BREAKPOINT_PX = 768;
+export const MOBILE_BREAKPOINT_PX = 768;
+
+/**
+ * Reactive `viewport < MOBILE_BREAKPOINT_PX` flag. Use in pages that want to
+ * swap their layout (e.g. stack panes vertically) below the breakpoint, in
+ * addition to (or instead of) the auto-collapse behaviour from
+ * `useResponsivePanels`.
+ */
+export function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`).matches;
+  });
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`);
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+  return isMobile;
+}
 
 /**
  * Auto-collapse the toolbar + sidebar on narrow viewports the first time they

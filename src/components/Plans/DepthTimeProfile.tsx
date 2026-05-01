@@ -1,27 +1,56 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Route } from '../../domain/types';
 import {
+  type CeilingSample,
   type DivePlanSummary,
   MAX_DESCENT_RATE_M_PER_MIN,
-  NDL_TABLE_M,
   stopsAtWaypointMin,
 } from '../../domain/divePlan';
 
 interface DepthTimeProfileProps {
   route: Route;
   summary: DivePlanSummary;
+  /** Override the auto-measured width. Use sparingly — the chart fills its parent by default. */
   width?: number;
+  /** Override the auto-derived height. Defaults to a clamped 2:1 aspect ratio of the measured width. */
   height?: number;
 }
 
 const PADDING = { top: 18, right: 60, bottom: 32, left: 48 };
+const FALLBACK_WIDTH = 480;
+const MIN_HEIGHT = 200;
+const MAX_HEIGHT = 320;
+/** Target chart aspect ratio (width / height) before clamping by MIN/MAX_HEIGHT. */
+const ASPECT_RATIO = 2;
 
 export default function DepthTimeProfile({
   route,
   summary,
-  width = 640,
-  height = 280,
+  width: widthOverride,
+  height: heightOverride,
 }: DepthTimeProfileProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  // Track the container's measured pixel width so the chart fills available
+  // space. ResizeObserver fires synchronously on layout changes — re-renders
+  // are cheap because the chart math is all derived from the current width.
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  useEffect(() => {
+    if (widthOverride != null) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === 'number' && w > 0) setMeasuredWidth(w);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [widthOverride]);
+
+  const width = widthOverride ?? measuredWidth ?? FALLBACK_WIDTH;
+  const height =
+    heightOverride ??
+    Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(width / ASPECT_RATIO)));
+
   const data = useMemo(() => buildSeries(route, summary), [route, summary]);
 
   if (data.depthPoints.length < 2) {
@@ -51,14 +80,19 @@ export default function DepthTimeProfile({
 
   const reserveY = barScale(route.gas.reserveBarPressure);
   const turnY = barScale(summary.turnPressureBar);
+  const ooaY = barScale(0);
 
   // Find the time at which cumulative air crosses turn pressure, for the
   // vertical "Turn" marker. Linear-interpolate between bar samples.
   const turnT = findTurnTime(data.barPoints, summary.turnPressureBar);
 
-  // NDL ceiling staircase across the dive's time range. Each step drops to
-  // the next-shallower bracket as elapsed time crosses an NDL boundary.
-  const ndlStair = buildNdlCeilingStair(data.maxTime);
+  // Bühlmann ZHL-16C deco ceiling, sampled along the planned depth profile
+  // by `divePlanSummary`. Split into runs where the ceiling is below the
+  // surface so we only draw the shaded "no-go" band when a real obligation
+  // exists. Violations (depth shallower than the ceiling) come back as
+  // separate runs so we can overlay them on the depth line.
+  const ceilingRuns = useMemo(() => groupCeilingRuns(summary.ceilingSamples), [summary.ceilingSamples]);
+  const violationRuns = useMemo(() => groupViolationRuns(summary.ceilingSamples), [summary.ceilingSamples]);
 
   // X-axis ticks every 5 minutes (or finer when total < 10 min).
   const xTickStep = data.maxTime <= 10 ? 1 : data.maxTime <= 30 ? 5 : 10;
@@ -72,14 +106,15 @@ export default function DepthTimeProfile({
   );
 
   return (
-    <svg
-      width={width}
-      height={height}
-      role="img"
-      aria-label={`Depth-time profile for ${route.name}`}
-      style={{ display: 'block' }}
-    >
-      <rect width={width} height={height} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={0.5} rx={4} />
+    <div ref={containerRef} className="w-full">
+      <svg
+        width={width}
+        height={height}
+        role="img"
+        aria-label={`Depth-time profile for ${route.name}`}
+        style={{ display: 'block' }}
+      >
+        <rect width={width} height={height} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={0.5} rx={4} />
 
       {/* X grid + ticks */}
       {xTicks.map((t) => (
@@ -182,7 +217,10 @@ export default function DepthTimeProfile({
         Pressure (bar)
       </text>
 
-      {/* Reserve + turn pressure dashed lines */}
+      {/* Reserve + turn pressure dashed lines, plus a solid out-of-air floor
+          at 0 bar. The OOA line is always drawn — it sits at or near the
+          bottom edge of the bar axis and only really stands out when the
+          plan dips into negative remaining (i.e. the air line crosses it). */}
       <line
         x1={PADDING.left}
         x2={width - PADDING.right}
@@ -207,54 +245,76 @@ export default function DepthTimeProfile({
       <text x={width - PADDING.right - 4} y={turnY - 2} fontSize={9} fill="#7c2d12" textAnchor="end">
         turn {Math.round(summary.turnPressureBar)} bar
       </text>
+      <line
+        x1={PADDING.left}
+        x2={width - PADDING.right}
+        y1={ooaY}
+        y2={ooaY}
+        stroke="#991b1b"
+        strokeWidth={1.2}
+      />
+      <text x={width - PADDING.right - 4} y={ooaY - 2} fontSize={9} fill="#991b1b" fontWeight={600} textAnchor="end">
+        out of air
+      </text>
 
-      {/* NDL / deco ceiling overlay — a staircase line that drops in from the
-          TOP of the chart as elapsed time accumulates. The region between
-          the chart top (the surface) and the ceiling is shaded translucent
-          red: the diver cannot ascend through that band without entering
-          deco territory at this point in the dive. */}
-      {ndlStair.length >= 2 && (
-        <g pointerEvents="none">
-          <path
-            d={
-              `M ${xScale(ndlStair[0]!.t)} ${depthScale(0)}` +
-              ` L ${xScale(ndlStair[0]!.t)} ${depthScale(ndlStair[0]!.ceiling)}` +
-              ndlStair
-                .slice(1)
-                .map((p) => ` L ${xScale(p.t)} ${depthScale(p.ceiling)}`)
-                .join('') +
-              ` L ${xScale(ndlStair[ndlStair.length - 1]!.t)} ${depthScale(0)} Z`
-            }
-            fill="rgba(220, 38, 38, 0.14)"
-          />
-          <path
-            d={
-              `M ${xScale(ndlStair[0]!.t)} ${depthScale(ndlStair[0]!.ceiling)}` +
-              ndlStair
-                .slice(1)
-                .map((p) => ` L ${xScale(p.t)} ${depthScale(p.ceiling)}`)
-                .join('')
-            }
-            fill="none"
-            stroke="#dc2626"
-            strokeWidth={1.2}
-            strokeDasharray="4 3"
-          />
-          <text
-            x={xScale(ndlStair[0]!.t) + 4}
-            y={depthScale(ndlStair[0]!.ceiling) + 11}
-            fontSize={9}
-            fill="#dc2626"
-            fontWeight={600}
-          >
-            NDL ceiling
-          </text>
-        </g>
-      )}
+      {/* Deco ceiling overlay — a smooth line that "comes in from the top"
+          as tissue loadings rise during the dive, and recedes back to the
+          surface as the diver off-gases at shallower depths. Only drawn
+          for runs where the ceiling is below the surface; the band between
+          the surface (top) and the ceiling is shaded translucent red as
+          the no-go zone. */}
+      {ceilingRuns.map((run, runIdx) => {
+        if (run.length < 2) return null;
+        const fillD =
+          `M ${xScale(run[0]!.tMin)} ${depthScale(0)}` +
+          run.map((p) => ` L ${xScale(p.tMin)} ${depthScale(p.ceilingM)}`).join('') +
+          ` L ${xScale(run[run.length - 1]!.tMin)} ${depthScale(0)} Z`;
+        const lineD =
+          `M ${xScale(run[0]!.tMin)} ${depthScale(run[0]!.ceilingM)}` +
+          run.slice(1).map((p) => ` L ${xScale(p.tMin)} ${depthScale(p.ceilingM)}`).join('');
+        return (
+          <g key={`ceil-${runIdx}`} pointerEvents="none">
+            <path d={fillD} fill="rgba(220, 38, 38, 0.14)" />
+            <path d={lineD} fill="none" stroke="#dc2626" strokeWidth={1.2} strokeDasharray="4 3" />
+            {runIdx === 0 && (
+              <text
+                x={xScale(run[0]!.tMin) + 4}
+                y={depthScale(run[0]!.ceilingM) + 11}
+                fontSize={9}
+                fill="#dc2626"
+                fontWeight={600}
+              >
+                Deco ceiling
+              </text>
+            )}
+          </g>
+        );
+      })}
 
       {/* Depth fill + line */}
       <path d={depthFill} fill={`${route.color}26`} />
       <path d={depthPath} fill="none" stroke={route.color} strokeWidth={1.6} />
+
+      {/* Ceiling violations: any sub-range where the planned depth rose
+          above the deco ceiling. Overlays a thick red segment on the
+          offending part of the depth line so it stands out from the
+          (otherwise quiet) ceiling band. */}
+      {violationRuns.map((run, i) => {
+        if (run.length < 2) return null;
+        const d =
+          `M ${xScale(run[0]!.tMin)} ${depthScale(run[0]!.depthM)}` +
+          run.slice(1).map((p) => ` L ${xScale(p.tMin)} ${depthScale(p.depthM)}`).join('');
+        return (
+          <path
+            key={`viol-${i}`}
+            d={d}
+            fill="none"
+            stroke="#dc2626"
+            strokeWidth={3}
+            pointerEvents="none"
+          />
+        );
+      })}
 
       {/* Rapid-descent stripes overlaid on offending segments. Rapid ascent
           isn't drawn — the planning model can't produce a faster ascent than
@@ -337,16 +397,21 @@ export default function DepthTimeProfile({
           <line x1={0} x2={10} y1={0} y2={0} stroke="#b45309" strokeWidth={1.4} />
           <text x={14} y={2} fill="#0f172a">air</text>
         </g>
-        <g transform="translate(100 0)">
-          <line x1={0} x2={10} y1={0} y2={0} stroke="#dc2626" strokeWidth={1.2} strokeDasharray="4 3" />
-          <text x={14} y={2} fill="#0f172a">NDL ceiling</text>
+        <g transform="translate(85 0)">
+          <line x1={0} x2={10} y1={0} y2={0} stroke="#991b1b" strokeWidth={1.2} />
+          <text x={14} y={2} fill="#0f172a">out of air</text>
         </g>
-        <g transform="translate(200 0)">
+        <g transform="translate(140 0)">
+          <line x1={0} x2={10} y1={0} y2={0} stroke="#dc2626" strokeWidth={1.2} strokeDasharray="4 3" />
+          <text x={14} y={2} fill="#0f172a">deco ceiling</text>
+        </g>
+        <g transform="translate(220 0)">
           <line x1={0} x2={10} y1={0} y2={0} stroke="#d97706" strokeWidth={2} strokeDasharray="3 2" />
           <text x={14} y={2} fill="#0f172a">rapid descent (&gt;{MAX_DESCENT_RATE_M_PER_MIN})</text>
         </g>
       </g>
-    </svg>
+      </svg>
+    </div>
   );
 }
 
@@ -426,38 +491,51 @@ function buildSeries(route: Route, summary: DivePlanSummary): ProfileSeries {
 }
 
 /**
- * Build a staircase of NDL ceiling points from t=0 up to {@link maxTime}.
- * Each table entry triggers a vertical drop in the ceiling line at the
- * elapsed time it takes to reach that depth's NDL — the result is a
- * polyline that monotonically deepens-then-shallows over time, suitable for
- * direct overlay on the depth-versus-time chart.
+ * Group consecutive samples whose ceiling sits below the surface (> 0 m)
+ * into runs. Lets the renderer skip the long stretches at the start of
+ * a dive where the ceiling is irrelevantly stuck at 0.
  */
-function buildNdlCeilingStair(maxTime: number): Array<{ t: number; ceiling: number }> {
-  if (maxTime <= 0) return [];
-  // Ascending order of NDL minutes — i.e. shortest NDL first (deepest depth).
-  const transitions = [...NDL_TABLE_M].sort((a, b) => a.ndlMin - b.ndlMin);
-  const points: Array<{ t: number; ceiling: number }> = [];
-  let lastCeiling: number | null = null;
-  for (const entry of transitions) {
-    if (entry.ndlMin > maxTime) break;
-    const newCeiling = entry.depthM;
-    if (lastCeiling == null) {
-      // First step: the ceiling appears at this transition time.
-      points.push({ t: entry.ndlMin, ceiling: newCeiling });
-    } else {
-      // Hold the previous ceiling until this transition, then drop to the
-      // shallower ceiling — two points to draw a vertical step.
-      points.push({ t: entry.ndlMin, ceiling: lastCeiling });
-      points.push({ t: entry.ndlMin, ceiling: newCeiling });
+function groupCeilingRuns(samples: CeilingSample[]): CeilingSample[][] {
+  const runs: CeilingSample[][] = [];
+  let current: CeilingSample[] | null = null;
+  for (const s of samples) {
+    if (s.ceilingM > 0) {
+      if (current == null) current = [s];
+      else current.push(s);
+    } else if (current != null) {
+      runs.push(current);
+      current = null;
     }
-    lastCeiling = newCeiling;
   }
-  // Extend the last ceiling out to the end of the chart.
-  if (lastCeiling != null) {
-    const lastT = points[points.length - 1]!.t;
-    if (lastT < maxTime) points.push({ t: maxTime, ceiling: lastCeiling });
+  if (current != null) runs.push(current);
+  return runs;
+}
+
+/**
+ * Group consecutive in-violation samples into runs, padded by one
+ * non-violating sample on each end so the overlay path connects cleanly to
+ * the surrounding depth line instead of starting/ending mid-air.
+ */
+function groupViolationRuns(samples: CeilingSample[]): CeilingSample[][] {
+  const runs: CeilingSample[][] = [];
+  let current: CeilingSample[] | null = null;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i]!;
+    if (s.violation) {
+      if (current == null) {
+        current = [];
+        const prev = samples[i - 1];
+        if (prev) current.push(prev);
+      }
+      current.push(s);
+    } else if (current != null) {
+      current.push(s);
+      runs.push(current);
+      current = null;
+    }
   }
-  return points;
+  if (current != null) runs.push(current);
+  return runs;
 }
 
 function findTurnTime(barPoints: Array<{ t: number; bar: number }>, turnBar: number): number | null {
